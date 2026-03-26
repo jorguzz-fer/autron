@@ -23,4 +23,7 @@ ENTRYPOINT ["streamlit", "run", "app.py", \
     "--server.address=0.0.0.0", \
     "--server.headless=true", \
     "--server.maxUploadSize=200", \
+    "--server.enableCORS=false", \
+    "--server.enableXsrfProtection=false", \
+    "--server.enableWebsocketCompression=false", \
     "--browser.gatherUsageStats=false"]
