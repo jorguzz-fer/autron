@@ -576,6 +576,9 @@ if erro:
 # SIDEBAR - FILTROS
 # ========================================================================
 with st.sidebar:
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=180)
     st.markdown("## 🔍 Filtros")
     st.markdown("---")
 
