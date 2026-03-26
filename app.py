@@ -4,19 +4,125 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import hashlib
 import os
 
 # ========================================================================
 # CONFIGURACAO
 # ========================================================================
 st.set_page_config(
-    page_title="Dashboard de Pedidos",
+    page_title="Dashboard de Pedidos - Autron",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "dados"))
+
+# ========================================================================
+# AUTENTICACAO
+# ========================================================================
+# Usuarios configurados via variavel de ambiente AUTH_USERS
+# Formato: "email1:senha1,email2:senha2"
+# Exemplo: "dani@autron.com:Autron2026,admin@autron.com:Admin123"
+# Se AUTH_USERS nao estiver definida, login fica desabilitado (acesso livre)
+
+AUTH_USERS_RAW = os.environ.get("AUTH_USERS", "")
+
+
+def get_usuarios():
+    """Carrega usuarios da variavel de ambiente."""
+    if not AUTH_USERS_RAW.strip():
+        return {}
+    usuarios = {}
+    for par in AUTH_USERS_RAW.split(","):
+        par = par.strip()
+        if ":" in par:
+            email, senha = par.split(":", 1)
+            usuarios[email.strip().lower()] = senha.strip()
+    return usuarios
+
+
+def hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+
+def verificar_login(email, senha):
+    usuarios = get_usuarios()
+    email = email.strip().lower()
+    if email in usuarios:
+        return usuarios[email] == senha
+    return False
+
+
+def tela_login():
+    """Exibe tela de login estilizada."""
+    st.markdown("""
+    <style>
+        .login-container {
+            max-width: 420px;
+            margin: 80px auto;
+            padding: 40px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid #2F5496;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .login-title {
+            text-align: center;
+            color: #4FC3F7;
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        .login-subtitle {
+            text-align: center;
+            color: #B0BEC5;
+            font-size: 0.95rem;
+            margin-bottom: 30px;
+        }
+        .login-logo {
+            text-align: center;
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+        [data-testid="stForm"] {
+            border: none !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.markdown('<div class="login-logo">📦</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">Autron</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-subtitle">Dashboard de Pedidos</div>', unsafe_allow_html=True)
+
+        with st.form("login_form"):
+            email = st.text_input("📧 Email", placeholder="seu@email.com")
+            senha = st.text_input("🔒 Senha", type="password", placeholder="Digite sua senha")
+            submit = st.form_submit_button("Entrar", use_container_width=True, type="primary")
+
+            if submit:
+                if email and senha:
+                    if verificar_login(email, senha):
+                        st.session_state["autenticado"] = True
+                        st.session_state["usuario"] = email.strip().lower()
+                        st.rerun()
+                    else:
+                        st.error("Email ou senha incorretos.")
+                else:
+                    st.warning("Preencha email e senha.")
+
+    st.stop()
+
+
+# Verificar se login esta habilitado
+LOGIN_HABILITADO = bool(AUTH_USERS_RAW.strip())
+
+if LOGIN_HABILITADO:
+    if not st.session_state.get("autenticado", False):
+        tela_login()
 
 CORES = {
     "azul": "#2F5496",
@@ -522,6 +628,16 @@ with st.sidebar:
     if st.button("🔄 Atualizar Dados", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+    # Usuario logado e logout
+    if LOGIN_HABILITADO:
+        st.markdown("---")
+        usuario = st.session_state.get("usuario", "")
+        st.caption(f"👤 {usuario}")
+        if st.button("🚪 Sair", use_container_width=True):
+            st.session_state["autenticado"] = False
+            st.session_state["usuario"] = ""
+            st.rerun()
 
 # Aplicar filtros
 mask = pd.Series(True, index=df.index)
