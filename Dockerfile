@@ -7,10 +7,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Pasta de dados persistente - configurar como volume no Coolify
 RUN mkdir -p /app/dados
+VOLUME ["/app/dados"]
 
 EXPOSE 8501
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false"]
+ENTRYPOINT ["streamlit", "run", "app.py", \
+    "--server.port=8501", \
+    "--server.address=0.0.0.0", \
+    "--server.headless=true", \
+    "--server.maxUploadSize=200", \
+    "--browser.gatherUsageStats=false"]

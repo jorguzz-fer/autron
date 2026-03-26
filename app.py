@@ -5,9 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import os
-import io
-import json
-import tempfile
 
 # ========================================================================
 # CONFIGURACAO
@@ -20,78 +17,6 @@ st.set_page_config(
 )
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "dados"))
-
-# Google Drive - IDs das pastas/arquivos (configurar via variavel de ambiente ou secrets)
-# Para usar: coloque os arquivos numa pasta do Google Drive e compartilhe com o service account
-GDRIVE_ENABLED = os.environ.get("GDRIVE_ENABLED", "false").lower() == "true"
-GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID", "")
-GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS", "")
-
-
-# ========================================================================
-# GOOGLE DRIVE - DOWNLOAD DOS ARQUIVOS
-# ========================================================================
-def baixar_do_gdrive():
-    """Baixa os 4 arquivos do Google Drive para a pasta local."""
-    try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-        from googleapiclient.http import MediaIoBaseDownload
-
-        # Carregar credenciais
-        if os.path.exists(GDRIVE_CREDENTIALS):
-            creds = service_account.Credentials.from_service_account_file(
-                GDRIVE_CREDENTIALS,
-                scopes=['https://www.googleapis.com/auth/drive.readonly']
-            )
-        else:
-            creds_json = json.loads(GDRIVE_CREDENTIALS)
-            creds = service_account.Credentials.from_service_account_info(
-                creds_json,
-                scopes=['https://www.googleapis.com/auth/drive.readonly']
-            )
-
-        service = build('drive', 'v3', credentials=creds)
-
-        # Listar arquivos na pasta
-        arquivos_esperados = {
-            'entrada_pedido.xlsx': None,
-            'followup.xlsx': None,
-            'mata010.xlsx': None,
-            'sciozmq0.csv': None
-        }
-
-        results = service.files().list(
-            q=f"'{GDRIVE_FOLDER_ID}' in parents and trashed=false",
-            fields="files(id, name, modifiedTime)"
-        ).execute()
-
-        for f in results.get('files', []):
-            if f['name'] in arquivos_esperados:
-                arquivos_esperados[f['name']] = f['id']
-
-        # Verificar se todos foram encontrados
-        faltando = [n for n, fid in arquivos_esperados.items() if fid is None]
-        if faltando:
-            return False, f"Arquivos nao encontrados no Google Drive: {', '.join(faltando)}"
-
-        # Baixar cada arquivo
-        os.makedirs(DATA_DIR, exist_ok=True)
-        for nome, file_id in arquivos_esperados.items():
-            request = service.files().get_media(fileId=file_id)
-            destino = os.path.join(DATA_DIR, nome)
-            with open(destino, 'wb') as fout:
-                downloader = MediaIoBaseDownload(fout, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-
-        return True, "Arquivos baixados com sucesso do Google Drive!"
-
-    except ImportError:
-        return False, "Bibliotecas do Google Drive nao instaladas. Instale: pip install google-api-python-client google-auth"
-    except Exception as e:
-        return False, f"Erro ao acessar Google Drive: {str(e)}"
 
 CORES = {
     "azul": "#2F5496",
@@ -414,49 +339,112 @@ def carregar_e_processar():
 
 
 # ========================================================================
-# GOOGLE DRIVE - SINCRONIZAR SE HABILITADO
-# ========================================================================
-if GDRIVE_ENABLED and GDRIVE_FOLDER_ID:
-    with st.spinner("Sincronizando com Google Drive..."):
-        ok, msg = baixar_do_gdrive()
-        if not ok:
-            st.warning(f"Google Drive: {msg}")
-
-
-# ========================================================================
-# UPLOAD MANUAL (fallback se nao tem Google Drive nem arquivos locais)
+# UPLOAD E GESTAO DE ARQUIVOS
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
-arquivos_necessarios = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozmq0.csv']
-arquivos_existentes = [f for f in arquivos_necessarios if os.path.exists(os.path.join(DATA_DIR, f))]
+ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozmq0.csv']
 
-if len(arquivos_existentes) < 4:
-    st.markdown("# 📦 Dashboard de Pedidos")
-    st.markdown("### 📤 Upload dos Arquivos")
-    st.markdown("Envie os 4 arquivos para iniciar o dashboard:")
+
+def verificar_arquivos():
+    """Retorna lista de arquivos presentes e ausentes."""
+    presentes = []
+    ausentes = []
+    for f in ARQUIVOS_NECESSARIOS:
+        caminho = os.path.join(DATA_DIR, f)
+        if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+            mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
+            presentes.append((f, mod_time))
+        else:
+            ausentes.append(f)
+    return presentes, ausentes
+
+
+def tela_upload():
+    """Exibe tela de upload dos arquivos."""
+    st.markdown("""
+    <div style="text-align: center; padding: 40px 0 20px 0;">
+        <h1 style="color: #4FC3F7;">📦 Dashboard de Pedidos</h1>
+        <p style="color: #B0BEC5; font-size: 1.1rem;">
+            Envie os 4 relatorios para gerar o dashboard
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    presentes, ausentes = verificar_arquivos()
+
+    if presentes:
+        st.markdown("#### ✅ Arquivos ja carregados:")
+        for nome, dt in presentes:
+            st.markdown(f"- **{nome}** — atualizado em {dt.strftime('%d/%m/%Y %H:%M')}")
+        st.markdown("")
+
+    if ausentes:
+        st.markdown(f"#### 📤 Arquivos pendentes ({len(ausentes)}):")
+        for nome in ausentes:
+            st.markdown(f"- ❌ {nome}")
+        st.markdown("")
+
+    st.markdown("---")
+    st.markdown("### Envie os arquivos:")
 
     col1, col2 = st.columns(2)
     with col1:
-        up_entrada = st.file_uploader("entrada_pedido.xlsx", type=['xlsx'], key='up1')
-        up_followup = st.file_uploader("followup.xlsx", type=['xlsx'], key='up2')
+        up_entrada = st.file_uploader(
+            "📋 entrada_pedido.xlsx",
+            type=['xlsx'], key='up_entrada',
+            help="Relatorio de entrada de pedidos do ERP"
+        )
+        up_followup = st.file_uploader(
+            "📅 followup.xlsx",
+            type=['xlsx'], key='up_followup',
+            help="Relatorio de follow-up de compras"
+        )
     with col2:
-        up_mata = st.file_uploader("mata010.xlsx", type=['xlsx'], key='up3')
-        up_scio = st.file_uploader("sciozmq0.csv", type=['csv'], key='up4')
+        up_mata = st.file_uploader(
+            "📦 mata010.xlsx",
+            type=['xlsx'], key='up_mata',
+            help="Relatorio de estoque (MATA010)"
+        )
+        up_scio = st.file_uploader(
+            "🏭 sciozmq0.csv",
+            type=['csv'], key='up_scio',
+            help="Relatorio SC com classificacao Comprando/Produzindo"
+        )
 
-    uploads = {'entrada_pedido.xlsx': up_entrada, 'followup.xlsx': up_followup,
-               'mata010.xlsx': up_mata, 'sciozmq0.csv': up_scio}
+    uploads = {
+        'entrada_pedido.xlsx': up_entrada,
+        'followup.xlsx': up_followup,
+        'mata010.xlsx': up_mata,
+        'sciozmq0.csv': up_scio
+    }
 
-    if all(u is not None for u in uploads.values()):
-        for nome, uploaded in uploads.items():
+    # Salvar arquivos enviados
+    algum_novo = False
+    for nome, uploaded in uploads.items():
+        if uploaded is not None:
             with open(os.path.join(DATA_DIR, nome), 'wb') as f:
                 f.write(uploaded.getbuffer())
-        st.success("Arquivos carregados! Reprocessando...")
+            algum_novo = True
+
+    # Verificar novamente apos upload
+    presentes, ausentes = verificar_arquivos()
+
+    if len(ausentes) == 0:
+        st.success("✅ Todos os arquivos prontos! Processando dashboard...")
         st.cache_data.clear()
         st.rerun()
+    elif algum_novo:
+        st.info(f"Faltam {len(ausentes)} arquivo(s): {', '.join(ausentes)}")
+        st.rerun()
     else:
-        enviados = sum(1 for u in uploads.values() if u is not None)
-        st.info(f"Enviados {enviados}/4 arquivos. Envie todos para continuar.")
+        st.info(f"Envie os {len(ausentes)} arquivo(s) pendente(s) para continuar.")
         st.stop()
+
+
+# Verificar se precisa mostrar tela de upload
+presentes, ausentes = verificar_arquivos()
+if len(ausentes) > 0:
+    tela_upload()
 
 
 # ========================================================================
@@ -466,7 +454,15 @@ df, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
-    st.info("Coloque os 4 arquivos na pasta 'dados/' ou use o upload acima.")
+    # Limpar arquivos corrompidos e forcar novo upload
+    st.warning("Pode haver um problema com os arquivos. Tente enviar novamente.")
+    if st.button("🔄 Reenviar arquivos"):
+        for f in ARQUIVOS_NECESSARIOS:
+            caminho = os.path.join(DATA_DIR, f)
+            if os.path.exists(caminho):
+                os.remove(caminho)
+        st.cache_data.clear()
+        st.rerun()
     st.stop()
 
 
@@ -500,6 +496,24 @@ with st.sidebar:
     # Pronto para Fazer
     pronto_opts = sorted(df['Pronto_para_Fazer'].unique())
     pronto_sel = st.multiselect("Pronto p/ Fazer?", pronto_opts, default=[])
+
+    st.markdown("---")
+
+    # Mostrar data dos arquivos carregados
+    presentes, _ = verificar_arquivos()
+    if presentes:
+        st.markdown("##### 📁 Arquivos carregados")
+        for nome, dt in presentes:
+            st.caption(f"{nome}: {dt.strftime('%d/%m/%Y %H:%M')}")
+
+    # Botao para atualizar arquivos
+    if st.button("📤 Atualizar Arquivos", use_container_width=True):
+        for f in ARQUIVOS_NECESSARIOS:
+            caminho = os.path.join(DATA_DIR, f)
+            if os.path.exists(caminho):
+                os.remove(caminho)
+        st.cache_data.clear()
+        st.rerun()
 
     st.markdown("---")
     ultima_att = datetime.now().strftime('%d/%m/%Y %H:%M')
