@@ -277,7 +277,16 @@ def carregar_e_processar():
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
+    # Tentar diferentes linhas de header para mata010
     mt = pd.read_excel(arq_estoque)
+    # Se nao encontrar 'Saldo Atual' ou similar, tentar header=1
+    _has_saldo = any('saldo' in str(c).lower() for c in mt.columns)
+    _has_codigo = any(str(c).lower().strip() in ('codigo', 'código') for c in mt.columns)
+    if not _has_saldo and not _has_codigo:
+        mt = pd.read_excel(arq_estoque, header=1)
+        _has_saldo = any('saldo' in str(c).lower() for c in mt.columns)
+        if not _has_saldo:
+            mt = pd.read_excel(arq_estoque, header=2)
     sc_csv = pd.read_csv(arq_sciozmq, encoding='latin-1', sep=';', header=2, low_memory=False)
 
     # Limpar entrada_pedido
@@ -309,9 +318,13 @@ def carregar_e_processar():
     col_saldo = [c for c in mt.columns if 'saldo' in c.lower() and 'atual' in c.lower()]
     if col_saldo:
         mt.rename(columns={col_saldo[0]: 'Saldo Atual'}, inplace=True)
-    col_codigo = [c for c in mt.columns if c.lower().strip() == 'codigo' or c.lower().strip() == 'código']
+    col_codigo = [c for c in mt.columns if c.lower().strip() in ('codigo', 'código', 'cod', 'cod.')]
     if col_codigo:
         mt.rename(columns={col_codigo[0]: 'Codigo'}, inplace=True)
+    if 'Codigo' not in mt.columns:
+        col_codigo_alt = [c for c in mt.columns if 'codig' in c.lower()]
+        if col_codigo_alt:
+            mt.rename(columns={col_codigo_alt[0]: 'Codigo'}, inplace=True)
     if 'Saldo Atual' not in mt.columns:
         # Tentar coluna que contenha 'saldo'
         col_saldo_alt = [c for c in mt.columns if 'saldo' in c.lower()]
