@@ -304,7 +304,21 @@ def carregar_e_processar():
     if 'OP na SC' not in fu.columns:
         fu['OP na SC'] = np.nan
 
-    # Limpar estoque
+    # Limpar estoque - normalizar nomes de colunas
+    mt.columns = mt.columns.str.strip()
+    col_saldo = [c for c in mt.columns if 'saldo' in c.lower() and 'atual' in c.lower()]
+    if col_saldo:
+        mt.rename(columns={col_saldo[0]: 'Saldo Atual'}, inplace=True)
+    col_codigo = [c for c in mt.columns if c.lower().strip() == 'codigo' or c.lower().strip() == 'código']
+    if col_codigo:
+        mt.rename(columns={col_codigo[0]: 'Codigo'}, inplace=True)
+    if 'Saldo Atual' not in mt.columns:
+        # Tentar coluna que contenha 'saldo'
+        col_saldo_alt = [c for c in mt.columns if 'saldo' in c.lower()]
+        if col_saldo_alt:
+            mt.rename(columns={col_saldo_alt[0]: 'Saldo Atual'}, inplace=True)
+        else:
+            mt['Saldo Atual'] = 0
     mt['Saldo Atual'] = pd.to_numeric(mt['Saldo Atual'], errors='coerce').fillna(0)
 
     # Classificacao Comprando/Produzindo
