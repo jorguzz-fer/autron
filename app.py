@@ -279,14 +279,17 @@ def carregar_e_processar():
     fu = pd.read_excel(arq_followup, header=1)
     # Tentar diferentes linhas de header para mata010
     mt = pd.read_excel(arq_estoque)
-    # Se nao encontrar 'Saldo Atual' ou similar, tentar header=1
-    _has_saldo = any('saldo' in str(c).lower() for c in mt.columns)
-    _has_codigo = any(str(c).lower().strip() in ('codigo', 'código') for c in mt.columns)
+    mt.columns = mt.columns.astype(str).str.strip()
+    # Se nao encontrar 'Saldo Atual' ou similar, tentar header=1, header=2
+    _has_saldo = any('saldo' in c.lower() for c in mt.columns)
+    _has_codigo = any(c.lower() in ('codigo', 'código') or 'cod' in c.lower() for c in mt.columns)
     if not _has_saldo and not _has_codigo:
         mt = pd.read_excel(arq_estoque, header=1)
-        _has_saldo = any('saldo' in str(c).lower() for c in mt.columns)
+        mt.columns = mt.columns.astype(str).str.strip()
+        _has_saldo = any('saldo' in c.lower() for c in mt.columns)
         if not _has_saldo:
             mt = pd.read_excel(arq_estoque, header=2)
+            mt.columns = mt.columns.astype(str).str.strip()
     sc_csv = pd.read_csv(arq_sciozmq, encoding='latin-1', sep=';', header=2, low_memory=False)
 
     # Limpar entrada_pedido
@@ -314,7 +317,7 @@ def carregar_e_processar():
         fu['OP na SC'] = np.nan
 
     # Limpar estoque - normalizar nomes de colunas
-    mt.columns = mt.columns.str.strip()
+    mt.columns = mt.columns.astype(str).str.strip()
     col_saldo = [c for c in mt.columns if 'saldo' in c.lower() and 'atual' in c.lower()]
     if col_saldo:
         mt.rename(columns={col_saldo[0]: 'Saldo Atual'}, inplace=True)
@@ -322,9 +325,12 @@ def carregar_e_processar():
     if col_codigo:
         mt.rename(columns={col_codigo[0]: 'Codigo'}, inplace=True)
     if 'Codigo' not in mt.columns:
-        col_codigo_alt = [c for c in mt.columns if 'codig' in c.lower()]
+        col_codigo_alt = [c for c in mt.columns if 'codig' in c.lower() or 'cod' in c.lower() or 'produto' in c.lower() or 'item' in c.lower() or 'b1_cod' in c.lower()]
         if col_codigo_alt:
             mt.rename(columns={col_codigo_alt[0]: 'Codigo'}, inplace=True)
+        else:
+            # Usar primeira coluna como codigo (fallback)
+            mt.rename(columns={mt.columns[0]: 'Codigo'}, inplace=True)
     if 'Saldo Atual' not in mt.columns:
         # Tentar coluna que contenha 'saldo'
         col_saldo_alt = [c for c in mt.columns if 'saldo' in c.lower()]
