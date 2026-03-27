@@ -376,9 +376,203 @@ cols_fat_det = [c for c in cols_fat_det if c in fat.columns]
 aba_fat_det = fat[cols_fat_det].sort_values('Emissao', ascending=False)
 
 # ========================================================================
-# EXPORTAR XLSX
+# EXPORTAR XLSX COM FORMATACAO
 # ========================================================================
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+from openpyxl.utils import get_column_letter
+
 output_file = 'dashboard_pedidos_powerbi_REV2.xlsx'
+
+# Estilos
+AZUL_ESCURO = '2F5496'
+AZUL_CLARO = 'D6E4F0'
+BRANCO = 'FFFFFF'
+VERDE_CLARO = 'E2EFDA'
+VERMELHO_CLARO = 'FCE4EC'
+AMARELO_CLARO = 'FFF9C4'
+CINZA_CLARO = 'F2F2F2'
+
+header_font = Font(name='Calibri', bold=True, color=BRANCO, size=10)
+header_fill = PatternFill(start_color=AZUL_ESCURO, end_color=AZUL_ESCURO, fill_type='solid')
+header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+cell_font = Font(name='Calibri', size=9)
+cell_align = Alignment(vertical='center')
+cell_align_center = Alignment(horizontal='center', vertical='center')
+thin_border = Border(
+    left=Side(style='thin', color='D9D9D9'),
+    right=Side(style='thin', color='D9D9D9'),
+    top=Side(style='thin', color='D9D9D9'),
+    bottom=Side(style='thin', color='D9D9D9')
+)
+zebra_fill = PatternFill(start_color=AZUL_CLARO, end_color=AZUL_CLARO, fill_type='solid')
+
+# Colunas de data, valor e percentual para formato especial
+DATE_COLS = {'DT Emissao', 'DT. Ofertada', 'DT. Fat. Cli', 'Prazo_Real_Entrega',
+             'FU_Dt_Chegada_Autron', 'Emissao', 'Data Emissao',
+             'Follow-Up Dt Confirmada', 'Follow-Up Dt Pre-Entrega',
+             'Dt Chegada Autron', 'Prazo Real Entrega'}
+MONEY_COLS = {'Vlr.Total', 'Prc Unitario', 'Vlr_Total_Fat', 'Valor_Total',
+              'Valor_Faturado', 'Valor_Previsto', 'Faturamento_Bruto',
+              'Faturamento_Liquido', 'Valor_Faturado', 'Valor_A_Faturar',
+              'Total_Previsto', 'Preco Total', 'Preco Unit.'}
+PCT_COLS = {'Margem', 'Pct_Faturado'}
+
+
+def formatar_aba(ws, df):
+    """Aplica formatacao profissional a uma aba."""
+    max_row = ws.max_row
+    max_col = ws.max_column
+
+    # Larguras de coluna baseadas no conteudo
+    col_widths = {}
+    for col_idx in range(1, max_col + 1):
+        col_letter = get_column_letter(col_idx)
+        header_val = str(ws.cell(1, col_idx).value or '')
+        max_len = len(header_val)
+        # Amostrar primeiras 100 linhas para calcular largura
+        for row_idx in range(2, min(max_row + 1, 102)):
+            val = ws.cell(row_idx, col_idx).value
+            if val is not None:
+                max_len = max(max_len, min(len(str(val)), 40))
+        col_widths[col_letter] = min(max(max_len + 3, 8), 45)
+
+    for letter, width in col_widths.items():
+        ws.column_dimensions[letter].width = width
+
+    # Header: formatacao
+    for col_idx in range(1, max_col + 1):
+        cell = ws.cell(1, col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+
+    # Dados: formatacao
+    headers = [str(ws.cell(1, c).value or '') for c in range(1, max_col + 1)]
+
+    for row_idx in range(2, max_row + 1):
+        is_zebra = (row_idx % 2 == 0)
+        for col_idx in range(1, max_col + 1):
+            cell = ws.cell(row_idx, col_idx)
+            cell.font = cell_font
+            cell.border = thin_border
+            cell.alignment = cell_align
+
+            col_name = headers[col_idx - 1]
+
+            # Zebra striping
+            if is_zebra:
+                cell.fill = zebra_fill
+
+            # Formato de data
+            if col_name in DATE_COLS and cell.value is not None:
+                cell.number_format = 'DD/MM/YYYY'
+                cell.alignment = cell_align_center
+
+            # Formato monetario
+            elif col_name in MONEY_COLS and cell.value is not None:
+                cell.number_format = '#,##0.00'
+
+            # Formato percentual
+            elif col_name in PCT_COLS and cell.value is not None:
+                cell.number_format = '0.00%' if isinstance(cell.value, float) and cell.value < 1 else '0.00'
+
+            # Centralizar colunas curtas
+            elif col_name in {'Item', 'Status_Pedido', 'Disponivel_Estoque', 'Pronto_para_Fazer',
+                              'Tipo_Produto', 'Acao_Necessaria', 'Semana_Entrega', 'Mes',
+                              'Quantidade', 'Qtd_Linhas', 'Qtd_PVs', 'Qtd_NFs',
+                              'Estoque_Disponivel', 'Qtd_Alocada', 'Numero SC', 'Numero OP',
+                              'Nota Fiscal', 'Mes_Faturamento', 'Mes_Previsao_Faturamento'}:
+                cell.alignment = cell_align_center
+
+    # Filtro automatico
+    ws.auto_filter.ref = f"A1:{get_column_letter(max_col)}{max_row}"
+
+    # Congelar primeira linha
+    ws.freeze_panes = 'A2'
+
+
+# Nomes amigaveis para cabecalhos
+RENAME_HEADERS = {
+    'Num. Pedido': 'Num. Pedido',
+    'Descricao do Produto': 'Descricao',
+    'Tipo_Produto': 'Tipo Produto',
+    'Prc Unitario': 'Preco Unitario',
+    'DT Emissao': 'Data Emissao',
+    'DT. Ofertada': 'Data Ofertada',
+    'DT. Fat. Cli': 'Data Solicitada Cliente',
+    'Ped Cliente': 'Pedido Cliente',
+    'Nome do Vendedor': 'Vendedor',
+    'Nota Fiscal': 'Nota Fiscal',
+    'Status_Pedido': 'Status',
+    'Prazo_Real_Entrega': 'Prazo Real Entrega',
+    'Semana_Entrega': 'Semana Entrega (Pasta)',
+    'FU_Dt_Chegada_Autron': 'Dt Chegada Autron',
+    'Estoque_Disponivel': 'Estoque Disponivel',
+    'Qtd_Alocada': 'Qtd Alocada',
+    'Disponivel_Estoque': 'Disponivel Estoque',
+    'Numero SC': 'SC',
+    'Numero OP': 'OP',
+    'FU_OP_na_SC': 'OP na SC',
+    'FU_PO': 'PO (Follow-Up)',
+    'Acao_Necessaria': 'Acao Necessaria',
+    'Pronto_para_Fazer': 'Pronto p/ Fazer',
+    'Dias_Atraso_Cliente': 'Dias Atraso Cliente',
+    'Dias_Atraso_Ofertada': 'Dias Atraso Ofertada',
+    'Mes_Emissao': 'Mes Emissao',
+    'Mes_Previsao_Faturamento': 'Mes Previsao Faturamento',
+    'TP Venda (PV)': 'Tipo Venda',
+    'Tipo Negocio (PV)': 'Tipo Negocio',
+    'Unidade Negocio': 'Unidade Negocio',
+    'Nome do Segmento 1': 'Segmento',
+    'Regional (PV)': 'Regional',
+    'Vlr_Total_Fat': 'Valor Total',
+    'Mes_Faturamento': 'Mes',
+    'Descricao Produto': 'Descricao',
+    'No do Pedido': 'No Pedido',
+    'Nome Fantasia': 'Nome Fantasia',
+    'Razao Social': 'Razao Social',
+    'Faturamento Bruto': 'Fat. Bruto',
+    'Faturamento Liquido': 'Fat. Liquido',
+    'Qtd_Linhas': 'Qtd Linhas',
+    'Qtd_PVs': 'Qtd PVs',
+    'Valor_Total': 'Valor Total (R$)',
+    'Qtd_NFs': 'Qtd NFs',
+    'Valor_Faturado': 'Valor Faturado (R$)',
+    'Faturamento_Bruto': 'Fat. Bruto (R$)',
+    'Faturamento_Liquido': 'Fat. Liquido (R$)',
+    'Valor_Previsto': 'Valor Previsto (R$)',
+    'Mes_Referencia': 'Mes Referencia',
+    'Valor_A_Faturar': 'Valor A Faturar (R$)',
+    'Total_Previsto': 'Total Previsto (R$)',
+    'Pct_Faturado': '% Faturado',
+}
+
+
+def renomear_colunas(df):
+    """Renomeia colunas para nomes amigaveis."""
+    return df.rename(columns={k: v for k, v in RENAME_HEADERS.items() if k in df.columns})
+
+
+# Renomear antes de exportar
+aba_consolidado = renomear_colunas(aba_consolidado)
+aba_abertos = renomear_colunas(aba_abertos)
+entrada_mes = renomear_colunas(entrada_mes)
+fat_mes = renomear_colunas(fat_mes)
+prev_mes = renomear_colunas(prev_mes)
+resumo_mes = renomear_colunas(resumo_mes)
+if len(detalhe_a_faturar) > 0:
+    detalhe_a_faturar = renomear_colunas(detalhe_a_faturar)
+aba_fat_det = renomear_colunas(aba_fat_det)
+
+# Atualizar DATE_COLS e MONEY_COLS com nomes renomeados
+DATE_COLS.update({'Data Emissao', 'Data Ofertada', 'Data Solicitada Cliente',
+                  'Prazo Real Entrega', 'Dt Chegada Autron'})
+MONEY_COLS.update({'Preco Unitario', 'Valor Total', 'Valor Total (R$)',
+                   'Valor Faturado (R$)', 'Valor Previsto (R$)',
+                   'Fat. Bruto (R$)', 'Fat. Liquido (R$)',
+                   'Valor A Faturar (R$)', 'Total Previsto (R$)',
+                   'Fat. Bruto', 'Fat. Liquido'})
 
 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
     aba_consolidado.to_excel(writer, sheet_name='Pedidos_Consolidado', index=False)
@@ -391,14 +585,19 @@ with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         detalhe_a_faturar.to_excel(writer, sheet_name='Detalhe_A_Faturar_Mes', index=False)
     aba_fat_det.to_excel(writer, sheet_name='Faturamento_Detalhado', index=False)
 
+    # Aplicar formatacao em todas as abas
+    for sheet_name in writer.sheets:
+        ws = writer.sheets[sheet_name]
+        formatar_aba(ws, None)
+
 print(f"\n✅ Arquivo gerado: {output_file}")
 print(f"\nAbas:")
-print(f"  1. Pedidos_Consolidado       - {len(aba_consolidado)} linhas (todos os pedidos com todas as informacoes)")
-print(f"  2. Pedidos_Em_Aberto         - {len(aba_abertos)} linhas (somente pedidos sem NF)")
-print(f"  3. Entrada_Pedidos_Mes       - {len(entrada_mes)} meses (entrada de pedidos por DT Emissao)")
-print(f"  4. Faturamento_Mes           - {len(fat_mes)} meses (faturamento realizado por Emissao NF)")
-print(f"  5. Previsao_Faturamento_Mes  - {len(prev_mes)} meses (previsao baseada em Dt Chegada Autron)")
-print(f"  6. Mes_Atual_Fat_vs_AFat     - Resumo mes atual: faturado vs a faturar")
+print(f"  1. Pedidos_Consolidado       - {len(aba_consolidado)} linhas")
+print(f"  2. Pedidos_Em_Aberto         - {len(aba_abertos)} linhas")
+print(f"  3. Entrada_Pedidos_Mes       - {len(entrada_mes)} meses")
+print(f"  4. Faturamento_Mes           - {len(fat_mes)} meses")
+print(f"  5. Previsao_Faturamento_Mes  - {len(prev_mes)} meses")
+print(f"  6. Mes_Atual_Fat_vs_AFat     - Resumo mes atual")
 if len(detalhe_a_faturar) > 0:
-    print(f"  7. Detalhe_A_Faturar_Mes     - {len(detalhe_a_faturar)} itens a faturar no mes atual")
-print(f"  8. Faturamento_Detalhado     - {len(aba_fat_det)} linhas (NFs detalhadas)")
+    print(f"  7. Detalhe_A_Faturar_Mes     - {len(detalhe_a_faturar)} itens")
+print(f"  8. Faturamento_Detalhado     - {len(aba_fat_det)} linhas")
