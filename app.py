@@ -263,20 +263,39 @@ def kpi_card(valor, label, tipo="normal"):
 # ========================================================================
 @st.cache_data(ttl=300)
 def carregar_e_processar():
-    """Carrega os 4 arquivos e processa toda a logica de negocio."""
+    """Carrega os 5 arquivos e processa toda a logica de negocio."""
 
     arq_entrada = os.path.join(DATA_DIR, "entrada_pedido.xlsx")
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
     arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
-    arq_sciozmq = os.path.join(DATA_DIR, "sciozmq0.csv")
+    arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
+    # Aceitar ambos os nomes do CSV
+    arq_sciozmq = os.path.join(DATA_DIR, "sciozvs0.csv")
+    if not os.path.exists(arq_sciozmq):
+        arq_sciozmq = os.path.join(DATA_DIR, "sciozmq0.csv")
 
     for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
         if not os.path.exists(arq):
-            return None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
+            return None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
 
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
+    # Faturamento (opcional - pode nao existir)
+    fat = None
+    if os.path.exists(arq_faturamento):
+        fat = pd.read_excel(arq_faturamento, header=1)
+        fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
+        col_vlr = [c for c in fat.columns if 'vlr' in c.lower() and 'total' in c.lower()]
+        if col_vlr:
+            fat.rename(columns={col_vlr[0]: 'Vlr.Total.Fat'}, inplace=True)
+        else:
+            fat['Vlr.Total.Fat'] = 0
+        fat['Vlr.Total.Fat'] = pd.to_numeric(fat['Vlr.Total.Fat'], errors='coerce')
+        fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto', 0), errors='coerce')
+        fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido', 0), errors='coerce')
+        fat['No do Pedido'] = fat['No do Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
+        fat['Mes_Faturamento'] = fat['Emissao'].dt.to_period('M').astype(str)
     # Tentar diferentes linhas de header para mata010
     mt = pd.read_excel(arq_estoque)
     mt.columns = mt.columns.astype(str).str.strip()
@@ -474,14 +493,19 @@ def carregar_e_processar():
         )
     )
 
-    return merged, None
+    # Mes previsto de faturamento (baseado em Dt Chegada Autron)
+    merged['Mes_Prev_Faturamento'] = merged['FU_Dt_Chegada_Autron'].dt.to_period('M').astype(str)
+    merged.loc[merged['FU_Dt_Chegada_Autron'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
+
+    return merged, fat, None
 
 
 # ========================================================================
 # UPLOAD E GESTAO DE ARQUIVOS
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
-ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozmq0.csv']
+ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozvs0.csv']
+ARQUIVOS_OPCIONAIS = ['faturamento.xlsx']
 
 
 def verificar_arquivos():
@@ -526,7 +550,7 @@ def tela_upload():
     st.markdown("---")
     st.markdown("### Envie os arquivos:")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         up_entrada = st.file_uploader(
             "📋 entrada_pedido.xlsx",
@@ -545,16 +569,23 @@ def tela_upload():
             help="Relatorio de estoque (MATA010)"
         )
         up_scio = st.file_uploader(
-            "🏭 sciozmq0.csv",
+            "🏭 sciozvs0.csv",
             type=['csv'], key='up_scio',
             help="Relatorio SC com classificacao Comprando/Produzindo"
+        )
+    with col3:
+        up_fat = st.file_uploader(
+            "💰 faturamento.xlsx",
+            type=['xlsx'], key='up_fat',
+            help="Relatorio de faturamento (NFs emitidas)"
         )
 
     uploads = {
         'entrada_pedido.xlsx': up_entrada,
         'followup.xlsx': up_followup,
         'mata010.xlsx': up_mata,
-        'sciozmq0.csv': up_scio
+        'sciozvs0.csv': up_scio,
+        'faturamento.xlsx': up_fat,
     }
 
     # Salvar arquivos enviados
@@ -589,7 +620,7 @@ if len(ausentes) > 0:
 # ========================================================================
 # CARREGAR DADOS
 # ========================================================================
-df, erro = carregar_e_processar()
+df, df_fat, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
@@ -703,7 +734,10 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ========================================================================
 # ABAS PRINCIPAIS
 # ========================================================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega",
+    "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao Faturamento"
+])
 
 
 # ===== ABA 1: VISAO GERAL =====
@@ -1051,3 +1085,159 @@ with tab4:
         erro_display = erros_df[['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Numero OP', 'FU_OP_na_SC']].copy()
         erro_display.columns = ['PV', 'Item', 'Produto', 'Descricao', 'OP (Entrada)', 'OP na SC (Follow-up)']
         st.dataframe(erro_display, use_container_width=True)
+
+
+# ===== ABA 5: FATURAMENTO =====
+with tab5:
+    today_period = pd.Timestamp.now().normalize().to_period('M')
+    mes_atual_str = str(today_period)
+
+    if df_fat is not None and len(df_fat) > 0:
+        # --- KPIs de Faturamento ---
+        fat_total = df_fat['Vlr.Total.Fat'].sum()
+        fat_bruto = df_fat['Faturamento Bruto'].sum()
+        fat_liquido = df_fat['Faturamento Liquido'].sum()
+        fat_mes_atual = df_fat[df_fat['Mes_Faturamento'] == mes_atual_str]
+        fat_mes_valor = fat_mes_atual['Vlr.Total.Fat'].sum()
+        fat_mes_nfs = fat_mes_atual['Num. Docto.'].nunique() if 'Num. Docto.' in fat_mes_atual.columns else 0
+
+        # Valor a faturar no mes (pedidos abertos com previsao no mes)
+        abertos_prev = df[
+            (df['Status_Pedido'] == 'EM ABERTO') &
+            (df['Mes_Prev_Faturamento'] == mes_atual_str)
+        ]
+        valor_a_faturar = abertos_prev['Vlr.Total'].sum()
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(kpi_card(f"R$ {fat_mes_valor:,.0f}", f"Faturado {mes_atual_str}", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "A Faturar (Mes)", "warn"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {fat_mes_valor + valor_a_faturar:,.0f}", "Total Previsto Mes", "normal"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{fat_mes_nfs}", "NFs no Mes"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"R$ {fat_liquido:,.0f}", "Fat. Liquido Total"), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Faturamento mes a mes
+            fat_por_mes = df_fat.groupby('Mes_Faturamento').agg(
+                Valor=('Vlr.Total.Fat', 'sum'),
+                Fat_Bruto=('Faturamento Bruto', 'sum'),
+                Fat_Liquido=('Faturamento Liquido', 'sum'),
+            ).reset_index().sort_values('Mes_Faturamento')
+
+            fig_fat = px.bar(fat_por_mes, x='Mes_Faturamento', y='Valor',
+                            title='Faturamento Mes a Mes (Valor Total)',
+                            color_discrete_sequence=[CORES['verde']])
+            fig_fat.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
+            )
+            st.plotly_chart(fig_fat, use_container_width=True)
+
+        with col2:
+            # Faturado vs A Faturar no mes atual
+            fat_vs_data = pd.DataFrame({
+                'Categoria': ['Faturado', 'A Faturar'],
+                'Valor': [fat_mes_valor, valor_a_faturar]
+            })
+            fig_vs = px.pie(fat_vs_data, values='Valor', names='Categoria',
+                           title=f'Faturado vs A Faturar - {mes_atual_str}',
+                           color='Categoria',
+                           color_discrete_map={'Faturado': CORES['verde'], 'A Faturar': CORES['amarelo']},
+                           hole=0.4)
+            fig_vs.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', height=400
+            )
+            st.plotly_chart(fig_vs, use_container_width=True)
+
+        # Tabela faturamento por mes
+        st.markdown("### 📋 Faturamento por Mes")
+        fat_por_mes_display = fat_por_mes.copy()
+        fat_por_mes_display.columns = ['Mes', 'Valor Total', 'Fat. Bruto', 'Fat. Liquido']
+        st.dataframe(fat_por_mes_display, use_container_width=True, height=400)
+
+        # Detalhe a faturar no mes atual
+        if len(abertos_prev) > 0:
+            st.markdown(f"### 📋 Detalhe - A Faturar em {mes_atual_str}")
+            cols_afat = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
+                        'Ped Cliente', 'Vlr.Total', 'FU_Dt_Chegada_Autron',
+                        'Pronto_para_Fazer', 'Acao_Necessaria']
+            cols_afat = [c for c in cols_afat if c in abertos_prev.columns]
+            st.dataframe(abertos_prev[cols_afat], use_container_width=True, height=300)
+    else:
+        st.warning("Arquivo faturamento.xlsx nao carregado. Envie o arquivo para ver esta aba.")
+
+
+# ===== ABA 6: PREVISAO FATURAMENTO =====
+with tab6:
+    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+
+    if len(abertos) > 0:
+        # Previsao de faturamento baseado em Dt Chegada Autron
+        prev_fat = abertos.groupby('Mes_Prev_Faturamento').agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Previsto=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Prev_Faturamento')
+
+        # KPIs
+        com_previsao = abertos[abertos['Mes_Prev_Faturamento'] != 'Sem previsao']
+        sem_previsao = abertos[abertos['Mes_Prev_Faturamento'] == 'Sem previsao']
+        valor_com = com_previsao['Vlr.Total'].sum()
+        valor_sem = sem_previsao['Vlr.Total'].sum()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(kpi_card(f"{len(com_previsao)}", "Com Previsao", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {valor_com:,.0f}", "Valor c/ Previsao", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{len(sem_previsao)}", "Sem Previsao", "alert"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {valor_sem:,.0f}", "Valor s/ Previsao", "warn"), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        # Grafico previsao
+        prev_graf = prev_fat[prev_fat['Mes_Prev_Faturamento'] != 'Sem previsao'].copy()
+        if len(prev_graf) > 0:
+            fig_prev = px.bar(prev_graf, x='Mes_Prev_Faturamento', y='Valor_Previsto',
+                             title='Previsao de Faturamento Mes a Mes (Dt Chegada Autron)',
+                             color_discrete_sequence=[CORES['azul_claro']],
+                             text='Qtd_PVs')
+            fig_prev.update_traces(texttemplate='%{text} PVs', textposition='outside')
+            fig_prev.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
+            )
+            st.plotly_chart(fig_prev, use_container_width=True)
+
+        # Entrada de pedidos mes a mes
+        st.markdown("### 📋 Entrada de Pedidos Mes a Mes")
+        entrada_mes = filtered.groupby('Mes_Emissao').agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Total=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Emissao')
+        entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_ent = px.bar(entrada_mes, x='Mes', y='Valor Total',
+                            title='Entrada de Pedidos - Valor por Mes (DT Emissao)',
+                            color_discrete_sequence=[CORES['azul_claro']],
+                            text='Qtd PVs')
+            fig_ent.update_traces(texttemplate='%{text} PVs', textposition='outside')
+            fig_ent.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
+            )
+            st.plotly_chart(fig_ent, use_container_width=True)
+        with col2:
+            st.dataframe(entrada_mes, use_container_width=True, height=400)
+
+        # Tabela previsao detalhada
+        st.markdown("### 📋 Previsao Detalhada")
+        prev_fat.columns = ['Mes Previsto', 'Qtd Linhas', 'Qtd PVs', 'Valor Previsto']
+        st.dataframe(prev_fat, use_container_width=True, height=300)
+    else:
+        st.info("Nenhum pedido em aberto com os filtros selecionados.")
