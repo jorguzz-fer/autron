@@ -6,6 +6,10 @@ import plotly.graph_objects as go
 from datetime import datetime
 import hashlib
 import os
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 # ========================================================================
 # CONFIGURACAO
@@ -263,22 +267,43 @@ def kpi_card(valor, label, tipo="normal"):
 # ========================================================================
 @st.cache_data(ttl=300)
 def carregar_e_processar():
-    """Carrega os 4 arquivos e processa toda a logica de negocio."""
+    """Carrega os arquivos e processa toda a logica de negocio."""
 
     arq_entrada = os.path.join(DATA_DIR, "entrada_pedido.xlsx")
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
     arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
-    arq_sciozmq = os.path.join(DATA_DIR, "sciozmq0.csv")
+    arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
 
-    for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
+    # CSV pode ter nomes diferentes
+    arq_scio = os.path.join(DATA_DIR, "sciozvs0.csv")
+    if not os.path.exists(arq_scio):
+        arq_scio = os.path.join(DATA_DIR, "sciozmq0.csv")
+
+    obrigatorios = [arq_entrada, arq_followup, arq_estoque, arq_scio]
+    for arq in obrigatorios:
         if not os.path.exists(arq):
-            return None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
+            return None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
 
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
-    mt = pd.read_excel(arq_estoque)
-    sc_csv = pd.read_csv(arq_sciozmq, encoding='latin-1', sep=';', header=2, low_memory=False)
+
+    # mata010 - detectar header automaticamente (pode estar na linha 0 ou 6)
+    mt_raw = pd.read_excel(arq_estoque, header=None, nrows=10)
+    header_row = 0
+    for i in range(10):
+        row_vals = [str(v) for v in mt_raw.iloc[i].tolist() if pd.notna(v)]
+        if 'Codigo' in row_vals:
+            header_row = i
+            break
+    mt = pd.read_excel(arq_estoque, header=header_row)
+
+    sc_csv = pd.read_csv(arq_scio, encoding='latin-1', sep=';', header=2, low_memory=False)
+
+    # Faturamento (opcional)
+    fat = None
+    if os.path.exists(arq_faturamento):
+        fat = pd.read_excel(arq_faturamento, header=1)
 
     # Limpar entrada_pedido
     ep['Num. Pedido'] = ep['Num. Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
@@ -441,27 +466,259 @@ def carregar_e_processar():
         )
     )
 
-    return merged, None
+    return merged, fat, None
+
+
+# ========================================================================
+# GERAR EXCEL PARA DOWNLOAD
+# ========================================================================
+def gerar_excel_consolidado(df, fat=None):
+    """Gera o Excel consolidado no mesmo formato do dashboard_pedidos_powerbi.xlsx."""
+    wb = Workbook()
+    header_font = Font(name='Arial', bold=True, color='FFFFFF', size=10)
+    header_fill = PatternFill('solid', fgColor='2F5496')
+    data_font = Font(name='Arial', size=9)
+    thin_border = Border(
+        left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9')
+    )
+    fill_verde = PatternFill('solid', fgColor='C6EFCE')
+    fill_amarelo = PatternFill('solid', fgColor='FFEB9C')
+    fill_vermelho = PatternFill('solid', fgColor='FFC7CE')
+    fill_erro = PatternFill('solid', fgColor='FF4444')
+    font_erro = Font(name='Arial', size=9, bold=True, color='FFFFFF')
+
+    output_cols = [
+        'Num. Pedido', 'Item', 'Cliente', 'Razao Social', 'Nome Fantasia',
+        'Produto', 'Descricao do Produto', 'Tipo_Produto', 'Quantidade',
+        'Prc Unitario', 'Vlr.Total', 'Margem',
+        'DT Emissao', 'Mes_Emissao', 'Ano_Emissao',
+        'DT. Ofertada', 'DT. Fat. Cli', 'Ped Cliente',
+        'Prazo_Real_Entrega', 'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Semana_Entrega',
+        'FU_Dt_Chegada_Autron', 'FU_PO', 'FU_OP_na_SC',
+        'Nota Fiscal', 'Status_Pedido',
+        'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
+        'Acao_Necessaria', 'Pronto_para_Fazer',
+        'Dias_Atraso_Ofertada', 'Dias_Atraso_Cliente',
+        'Numero SC', 'Numero OP', 'TP Venda (PV)', 'Tipo Negocio (PV)',
+        'Nome do Vendedor', 'Familia', 'Fabricante',
+        'Unidade Negocio', 'Estado', 'Regional (PV)',
+        'Nome do Segmento 1', 'Nome do Segmento 2', 'Nome do Segmento 3'
+    ]
+    header_map = {
+        'Num. Pedido': 'PV', 'Item': 'Item', 'Cliente': 'Cod Cliente',
+        'Razao Social': 'Razao Social', 'Nome Fantasia': 'Nome Fantasia',
+        'Produto': 'Codigo Produto', 'Descricao do Produto': 'Descricao Produto',
+        'Tipo_Produto': 'Tipo (Comprando/Produzindo)',
+        'Quantidade': 'Qtd', 'Prc Unitario': 'Preco Unit.', 'Vlr.Total': 'Valor Total',
+        'Margem': 'Margem %', 'DT Emissao': 'Data Emissao', 'Mes_Emissao': 'Mes Emissao',
+        'Ano_Emissao': 'Ano Emissao', 'DT. Ofertada': 'Data Ofertada',
+        'DT. Fat. Cli': 'Data Solicitada Cliente', 'Ped Cliente': 'Pedido Cliente',
+        'Prazo_Real_Entrega': 'Prazo Real Entrega', 'FU_Dt_Confirma': 'Follow-Up Dt Confirmada',
+        'FU_Dt_Pre_Entr': 'Follow-Up Dt Pre-Entrega', 'Semana_Entrega': 'Semana Entrega (Pasta)',
+        'FU_Dt_Chegada_Autron': 'Dt Chegada Autron',
+        'FU_PO': 'Purchase Order', 'FU_OP_na_SC': 'OP na SC',
+        'Nota Fiscal': 'Nota Fiscal', 'Status_Pedido': 'Status',
+        'Estoque_Disponivel': 'Estoque Disponivel', 'Qtd_Alocada': 'Qtd Alocada Estoque',
+        'Disponivel_Estoque': 'Disponibilidade Estoque',
+        'Acao_Necessaria': 'Acao Necessaria', 'Pronto_para_Fazer': 'Pronto p/ Fazer?',
+        'Dias_Atraso_Ofertada': 'Dias Atraso vs Ofertada',
+        'Dias_Atraso_Cliente': 'Dias Atraso vs Cliente',
+        'Numero SC': 'No SC', 'Numero OP': 'No OP',
+        'TP Venda (PV)': 'Tipo Venda', 'Tipo Negocio (PV)': 'Tipo Negocio',
+        'Nome do Vendedor': 'Vendedor', 'Familia': 'Familia', 'Fabricante': 'Fabricante',
+        'Unidade Negocio': 'Unidade Negocio', 'Estado': 'Estado',
+        'Regional (PV)': 'Regional', 'Nome do Segmento 1': 'Segmento 1',
+        'Nome do Segmento 2': 'Segmento 2', 'Nome do Segmento 3': 'Segmento 3'
+    }
+
+    cols = [c for c in output_cols if c in df.columns]
+    headers = [header_map.get(c, c) for c in cols]
+    output = df[cols].copy().sort_values(['Status_Pedido', 'DT Emissao', 'Num. Pedido', 'Item'])
+
+    date_cols = {'DT Emissao', 'DT. Ofertada', 'DT. Fat. Cli', 'Prazo_Real_Entrega',
+                 'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'FU_Dt_Chegada_Autron'}
+    col_idx_map = {c: i for i, c in enumerate(cols)}
+
+    # --- Aba Pedidos_Consolidado ---
+    ws = wb.active
+    ws.title = 'Pedidos_Consolidado'
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=ci, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = thin_border
+
+    for ri, (_, row) in enumerate(output.iterrows(), 2):
+        for ci, col_name in enumerate(cols, 1):
+            val = row[col_name]
+            if pd.isna(val): val = None
+            elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
+            elif isinstance(val, (np.int64, np.float64)):
+                val = float(val) if not np.isnan(val) else None
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.font = data_font
+            cell.border = thin_border
+            if col_name in date_cols and val is not None: cell.number_format = 'DD/MM/YYYY'
+            elif col_name == 'Margem' and val is not None: cell.number_format = '0.00%'
+            elif col_name in ('Prc Unitario', 'Vlr.Total') and val is not None: cell.number_format = '#,##0.00'
+
+        # Cores condicionais
+        for field, fills in [
+            ('Status_Pedido', {'FINALIZADO': fill_verde, 'EM ABERTO': fill_vermelho}),
+            ('Disponivel_Estoque', {'SIM': fill_verde, 'PARCIAL': fill_amarelo, 'NAO': fill_vermelho}),
+        ]:
+            idx = col_idx_map.get(field)
+            if idx is not None:
+                c = ws.cell(row=ri, column=idx + 1)
+                f = fills.get(c.value)
+                if f: c.fill = f
+
+        idx = col_idx_map.get('Pronto_para_Fazer')
+        if idx is not None:
+            c = ws.cell(row=ri, column=idx + 1)
+            v = c.value
+            if v in ('SIM', 'FINALIZADO'): c.fill = fill_verde
+            elif v and 'PARCIAL' in str(v): c.fill = fill_amarelo
+            elif v == 'NAO': c.fill = fill_vermelho
+
+        idx = col_idx_map.get('Acao_Necessaria')
+        if idx is not None:
+            c = ws.cell(row=ri, column=idx + 1)
+            v = c.value
+            if v == 'ERRO no CADASTRO': c.fill = fill_erro; c.font = font_erro
+            elif v == 'Estoque OK': c.fill = fill_verde
+            elif v and 'Necessario' in str(v): c.fill = fill_vermelho
+            elif v and ('gerada' in str(v) or 'Aguardando' in str(v)): c.fill = fill_amarelo
+
+    for ci in range(1, len(headers) + 1):
+        max_len = len(str(ws.cell(row=1, column=ci).value or ''))
+        for ri in range(2, min(100, ws.max_row + 1)):
+            max_len = max(max_len, len(str(ws.cell(row=ri, column=ci).value or '')))
+        ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 35)
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = f'A1:{get_column_letter(len(headers))}{ws.max_row}'
+
+    # --- Aba Estoque_Pedidos_Abertos ---
+    ws2 = wb.create_sheet('Estoque_Pedidos_Abertos')
+    open_cols = [c for c in ['Produto', 'Descricao do Produto', 'Tipo_Produto', 'Num. Pedido', 'Item',
+        'Quantidade', 'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
+        'Acao_Necessaria', 'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'DT Emissao'] if c in output.columns]
+    open_data = output[output['Status_Pedido'] == 'EM ABERTO'][open_cols].sort_values(['Produto', 'DT Emissao'])
+    headers2 = ['Codigo Produto', 'Descricao', 'Tipo (Comp/Prod)', 'PV', 'Item', 'Qtd Pedida',
+                'Estoque Total', 'Qtd Alocada', 'Disponibilidade', 'Acao Necessaria',
+                'No SC', 'No OP', 'OP na SC (Follow-up)', 'Data Emissao PV']
+    for ci, h in enumerate(headers2, 1):
+        cell = ws2.cell(row=1, column=ci, value=h)
+        cell.font = header_font; cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = thin_border
+    for ri, (_, row) in enumerate(open_data.iterrows(), 2):
+        for ci, col in enumerate(open_data.columns, 1):
+            val = row[col]
+            if pd.isna(val): val = None
+            elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
+            elif isinstance(val, (np.int64, np.float64)):
+                val = float(val) if not np.isnan(val) else None
+            cell = ws2.cell(row=ri, column=ci, value=val)
+            cell.font = data_font; cell.border = thin_border
+            if col == 'DT Emissao' and val: cell.number_format = 'DD/MM/YYYY'
+        c = ws2.cell(row=ri, column=9)
+        if c.value == 'SIM': c.fill = fill_verde
+        elif c.value == 'PARCIAL': c.fill = fill_amarelo
+        elif c.value == 'NAO': c.fill = fill_vermelho
+        c2 = ws2.cell(row=ri, column=10)
+        if c2.value == 'ERRO no CADASTRO': c2.fill = fill_erro; c2.font = font_erro
+        elif c2.value == 'Estoque OK': c2.fill = fill_verde
+        elif c2.value and 'Necessario' in str(c2.value): c2.fill = fill_vermelho
+        elif c2.value and 'gerada' in str(c2.value): c2.fill = fill_amarelo
+    for ci in range(1, len(headers2) + 1):
+        max_len = len(str(ws2.cell(row=1, column=ci).value or ''))
+        for ri in range(2, min(50, ws2.max_row + 1)):
+            max_len = max(max_len, len(str(ws2.cell(row=ri, column=ci).value or '')))
+        ws2.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
+    ws2.freeze_panes = 'A2'
+    ws2.auto_filter.ref = f'A1:{get_column_letter(len(headers2))}{ws2.max_row}'
+
+    # --- Aba Faturamento (se disponivel) ---
+    if fat is not None and len(fat) > 0:
+        ws3 = wb.create_sheet('Faturamento')
+        fat_cols = [c for c in ['Emissao', 'Num. Docto.', 'Serie', 'No do Pedido', 'Item Pv', 'Produto',
+            'Descricao Produto', 'Quantidade', 'Vlr.Unitario', 'Vlr. Total (quant * preco un)',
+            'Vlr.Bruto', 'Cliente', 'Razao Social', 'Nome Fantasia', 'UF',
+            'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
+            'Margem Liquida (%) por NF Faturada', 'Nome do Vendedor', 'Tipo Negocio',
+            'TP Venda', 'Regional', 'Unid Negocio'] if c in fat.columns]
+        for ci, h in enumerate(fat_cols, 1):
+            cell = ws3.cell(row=1, column=ci, value=h)
+            cell.font = header_font; cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = thin_border
+        for ri, (_, row) in enumerate(fat[fat_cols].iterrows(), 2):
+            for ci, col in enumerate(fat_cols, 1):
+                val = row[col]
+                if pd.isna(val): val = None
+                elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
+                elif isinstance(val, (np.int64, np.float64)):
+                    val = float(val) if not np.isnan(val) else None
+                cell = ws3.cell(row=ri, column=ci, value=val)
+                cell.font = data_font; cell.border = thin_border
+                if col == 'Emissao' and val: cell.number_format = 'DD/MM/YYYY'
+                elif col in ('Vlr.Unitario', 'Vlr. Total (quant * preco un)', 'Vlr.Bruto',
+                              'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)'):
+                    if val is not None: cell.number_format = '#,##0.00'
+        for ci in range(1, len(fat_cols) + 1):
+            max_len = len(str(ws3.cell(row=1, column=ci).value or ''))
+            for ri in range(2, min(50, ws3.max_row + 1)):
+                max_len = max(max_len, len(str(ws3.cell(row=ri, column=ci).value or '')))
+            ws3.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 35)
+        ws3.freeze_panes = 'A2'
+        ws3.auto_filter.ref = f'A1:{get_column_letter(len(fat_cols))}{ws3.max_row}'
+
+    # Salvar em buffer
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 # ========================================================================
 # UPLOAD E GESTAO DE ARQUIVOS
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
-ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozmq0.csv']
+ARQUIVOS_OBRIGATORIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx']
+ARQUIVOS_CSV = ['sciozvs0.csv', 'sciozmq0.csv']  # aceita qualquer um dos dois
+ARQUIVO_OPCIONAL = 'faturamento.xlsx'
 
 
 def verificar_arquivos():
     """Retorna lista de arquivos presentes e ausentes."""
     presentes = []
     ausentes = []
-    for f in ARQUIVOS_NECESSARIOS:
+    for f in ARQUIVOS_OBRIGATORIOS:
         caminho = os.path.join(DATA_DIR, f)
         if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
             mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
             presentes.append((f, mod_time))
         else:
             ausentes.append(f)
+    # CSV - qualquer um dos dois nomes
+    csv_encontrado = False
+    for csv_name in ARQUIVOS_CSV:
+        caminho = os.path.join(DATA_DIR, csv_name)
+        if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+            mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
+            presentes.append((csv_name, mod_time))
+            csv_encontrado = True
+            break
+    if not csv_encontrado:
+        ausentes.append('sciozvs0.csv (ou sciozmq0.csv)')
+    # Faturamento (opcional)
+    caminho = os.path.join(DATA_DIR, ARQUIVO_OPCIONAL)
+    if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+        mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
+        presentes.append((ARQUIVO_OPCIONAL + ' (opcional)', mod_time))
     return presentes, ausentes
 
 
@@ -471,7 +728,7 @@ def tela_upload():
     <div style="text-align: center; padding: 40px 0 20px 0;">
         <h1 style="color: #4FC3F7;">📦 Dashboard de Pedidos</h1>
         <p style="color: #B0BEC5; font-size: 1.1rem;">
-            Envie os 4 relatorios para gerar o dashboard
+            Envie os relatorios para gerar o dashboard
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -505,6 +762,11 @@ def tela_upload():
             type=['xlsx'], key='up_followup',
             help="Relatorio de follow-up de compras"
         )
+        up_faturamento = st.file_uploader(
+            "💰 faturamento.xlsx (opcional)",
+            type=['xlsx'], key='up_faturamento',
+            help="Relatorio de faturamento"
+        )
     with col2:
         up_mata = st.file_uploader(
             "📦 mata010.xlsx",
@@ -512,7 +774,7 @@ def tela_upload():
             help="Relatorio de estoque (MATA010)"
         )
         up_scio = st.file_uploader(
-            "🏭 sciozmq0.csv",
+            "🏭 sciozvs0.csv / sciozmq0.csv",
             type=['csv'], key='up_scio',
             help="Relatorio SC com classificacao Comprando/Produzindo"
         )
@@ -521,7 +783,6 @@ def tela_upload():
         'entrada_pedido.xlsx': up_entrada,
         'followup.xlsx': up_followup,
         'mata010.xlsx': up_mata,
-        'sciozmq0.csv': up_scio
     }
 
     # Salvar arquivos enviados
@@ -531,6 +792,19 @@ def tela_upload():
             with open(os.path.join(DATA_DIR, nome), 'wb') as f:
                 f.write(uploaded.getbuffer())
             algum_novo = True
+
+    # CSV - salvar com o nome original do arquivo
+    if up_scio is not None:
+        csv_save_name = up_scio.name if up_scio.name in ARQUIVOS_CSV else 'sciozvs0.csv'
+        with open(os.path.join(DATA_DIR, csv_save_name), 'wb') as f:
+            f.write(up_scio.getbuffer())
+        algum_novo = True
+
+    # Faturamento (opcional)
+    if up_faturamento is not None:
+        with open(os.path.join(DATA_DIR, ARQUIVO_OPCIONAL), 'wb') as f:
+            f.write(up_faturamento.getbuffer())
+        algum_novo = True
 
     # Verificar novamente apos upload
     presentes, ausentes = verificar_arquivos()
@@ -556,14 +830,13 @@ if len(ausentes) > 0:
 # ========================================================================
 # CARREGAR DADOS
 # ========================================================================
-df, erro = carregar_e_processar()
+df, fat_df, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
-    # Limpar arquivos corrompidos e forcar novo upload
     st.warning("Pode haver um problema com os arquivos. Tente enviar novamente.")
     if st.button("🔄 Reenviar arquivos"):
-        for f in ARQUIVOS_NECESSARIOS:
+        for f in ARQUIVOS_OBRIGATORIOS + ARQUIVOS_CSV + [ARQUIVO_OPCIONAL]:
             caminho = os.path.join(DATA_DIR, f)
             if os.path.exists(caminho):
                 os.remove(caminho)
@@ -617,12 +890,30 @@ with st.sidebar:
 
     # Botao para atualizar arquivos
     if st.button("📤 Atualizar Arquivos", use_container_width=True):
-        for f in ARQUIVOS_NECESSARIOS:
+        for f in ARQUIVOS_OBRIGATORIOS + ARQUIVOS_CSV + [ARQUIVO_OPCIONAL]:
             caminho = os.path.join(DATA_DIR, f)
             if os.path.exists(caminho):
                 os.remove(caminho)
         st.cache_data.clear()
         st.rerun()
+
+    st.markdown("---")
+
+    # Botao download Excel
+    st.markdown("##### 📥 Exportar Planilha")
+    if st.button("Gerar Excel Consolidado", use_container_width=True, type="primary"):
+        with st.spinner("Gerando planilha..."):
+            excel_buffer = gerar_excel_consolidado(df, fat_df)
+            st.session_state['excel_pronto'] = excel_buffer
+
+    if 'excel_pronto' in st.session_state:
+        st.download_button(
+            label="⬇️ Baixar Planilha",
+            data=st.session_state['excel_pronto'],
+            file_name=f"dashboard_pedidos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
     st.markdown("---")
     ultima_att = datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -670,7 +961,11 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ========================================================================
 # ABAS PRINCIPAIS
 # ========================================================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP"])
+if fat_df is not None and len(fat_df) > 0:
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento"])
+else:
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP"])
+    tab5 = None
 
 
 # ===== ABA 1: VISAO GERAL =====
@@ -1018,3 +1313,63 @@ with tab4:
         erro_display = erros_df[['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Numero OP', 'FU_OP_na_SC']].copy()
         erro_display.columns = ['PV', 'Item', 'Produto', 'Descricao', 'OP (Entrada)', 'OP na SC (Follow-up)']
         st.dataframe(erro_display, use_container_width=True)
+
+
+# ===== ABA 5: FATURAMENTO =====
+if tab5 is not None:
+    with tab5:
+        fat = fat_df.copy()
+        fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
+        fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto'), errors='coerce')
+        fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido'), errors='coerce')
+        fat['Margem Liquida (R$)'] = pd.to_numeric(fat.get('Margem Liquida (R$)'), errors='coerce')
+
+        fat_bruto = fat['Faturamento Bruto'].sum()
+        fat_liq = fat['Faturamento Liquido'].sum()
+        fat_margem = fat['Margem Liquida (R$)'].sum()
+        fat_nfs = fat['Num. Docto.'].nunique() if 'Num. Docto.' in fat.columns else 0
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(kpi_card(f"R$ {fat_bruto:,.0f}", "Faturamento Bruto"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fat_liq:,.0f}", "Faturamento Liquido", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {fat_margem:,.0f}", "Margem Liquida", "warn"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{fat_nfs}", "Notas Fiscais"), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            fat['Mes_Fat'] = fat['Emissao'].dt.to_period('M').astype(str)
+            fat_mes = fat.groupby('Mes_Fat').agg({'Faturamento Liquido': 'sum'}).reset_index()
+            fat_mes = fat_mes.sort_values('Mes_Fat')
+            fig = px.bar(fat_mes, x='Mes_Fat', y='Faturamento Liquido',
+                        title='Faturamento Liquido por Mes',
+                        color_discrete_sequence=[CORES['verde']])
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            if 'Nome do Vendedor' in fat.columns:
+                fat_vend = fat.groupby('Nome do Vendedor').agg(
+                    {'Faturamento Liquido': 'sum'}
+                ).reset_index().sort_values('Faturamento Liquido', ascending=True).tail(10)
+                fig2 = px.bar(fat_vend, x='Faturamento Liquido', y='Nome do Vendedor',
+                             title='Top 10 Vendedores - Faturamento Liquido',
+                             orientation='h', color_discrete_sequence=[CORES['azul_claro']])
+                fig2.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#E0E0E0', yaxis_title='', xaxis_title='R$', height=400
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+        st.markdown("### 📋 Detalhe do Faturamento")
+        fat_display_cols = [c for c in ['Emissao', 'Num. Docto.', 'No do Pedido', 'Produto',
+            'Descricao Produto', 'Quantidade', 'Razao Social', 'Nome Fantasia', 'UF',
+            'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
+            'Nome do Vendedor', 'Tipo Negocio'] if c in fat.columns]
+        fat_table = fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
+        st.dataframe(fat_table, use_container_width=True, height=500)
