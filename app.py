@@ -1068,11 +1068,20 @@ with tab2:
     nao_prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'NAO'])
     erros = len(abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO'])
 
+    # KPIs como botoes clicaveis
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(kpi_card(f"{prontos}", "Prontos p/ Fazer", "ok"), unsafe_allow_html=True)
-    c2.markdown(kpi_card(f"{parciais}", "Parcialmente Prontos", "warn"), unsafe_allow_html=True)
-    c3.markdown(kpi_card(f"{nao_prontos}", "Nao Prontos", "alert"), unsafe_allow_html=True)
-    c4.markdown(kpi_card(f"{erros}", "ERROS Cadastro", "alert" if erros > 0 else "ok"), unsafe_allow_html=True)
+    with c1:
+        if st.button(f"✅ {prontos}\nProntos p/ Fazer", key="kpi_prontos", use_container_width=True):
+            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'SIM')
+    with c2:
+        if st.button(f"⚠️ {parciais}\nParcialmente Prontos", key="kpi_parciais", use_container_width=True):
+            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'PARCIAL')
+    with c3:
+        if st.button(f"🔴 {nao_prontos}\nNao Prontos", key="kpi_nao_prontos", use_container_width=True):
+            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'NAO')
+    with c4:
+        if st.button(f"❌ {erros}\nERROS Cadastro", key="kpi_erros_t2", use_container_width=True):
+            st.session_state['tab2_filtro'] = ('Acao_Necessaria', 'ERRO no CADASTRO')
 
     st.markdown("")
 
@@ -1099,7 +1108,6 @@ with tab2:
             )
             evento_pronto = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="pie_pronto")
 
-            # Extrair fatia(s) clicada(s)
             if evento_pronto and evento_pronto.selection and evento_pronto.selection.points:
                 filtro_pronto_sel = [p['label'] for p in evento_pronto.selection.points if 'label' in p]
 
@@ -1118,24 +1126,41 @@ with tab2:
             )
             evento_tipo = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_tipo")
 
-            # Extrair barra(s) clicada(s)
             if evento_tipo and evento_tipo.selection and evento_tipo.selection.points:
                 filtro_tipo_sel = [p['x'] for p in evento_tipo.selection.points if 'x' in p]
 
-    # Aplicar filtros dos cliques nos graficos
+    # Aplicar filtros: KPI button OU clique no grafico
     tabela_abertos = abertos.copy()
+    filtro_info_partes = []
+
+    # Filtro via KPI button
+    kpi_filtro = st.session_state.get('tab2_filtro')
+    if kpi_filtro:
+        campo, valor = kpi_filtro
+        if campo == 'Pronto_para_Fazer' and valor == 'PARCIAL':
+            tabela_abertos = tabela_abertos[tabela_abertos[campo].str.contains('PARCIAL', na=False)]
+            filtro_info_partes.append(f"Parcialmente Prontos")
+        else:
+            tabela_abertos = tabela_abertos[tabela_abertos[campo] == valor]
+            filtro_info_partes.append(f"{valor}")
+
+    # Filtro via clique no grafico (sobrepoe KPI se houver)
     if filtro_pronto_sel:
-        tabela_abertos = tabela_abertos[tabela_abertos['Pronto_para_Fazer'].isin(filtro_pronto_sel)]
+        tabela_abertos = abertos[abertos['Pronto_para_Fazer'].isin(filtro_pronto_sel)]
+        filtro_info_partes = [f"Pronto: {', '.join(filtro_pronto_sel)}"]
+        st.session_state.pop('tab2_filtro', None)
     if filtro_tipo_sel:
         tabela_abertos = tabela_abertos[tabela_abertos['Tipo_Produto'].isin(filtro_tipo_sel)]
+        filtro_info_partes.append(f"Tipo: {', '.join(filtro_tipo_sel)}")
+        st.session_state.pop('tab2_filtro', None)
 
-    # Tabela detalhada
-    filtro_info = ""
-    if filtro_pronto_sel or filtro_tipo_sel:
-        partes = []
-        if filtro_pronto_sel: partes.append(f"Pronto: {', '.join(filtro_pronto_sel)}")
-        if filtro_tipo_sel: partes.append(f"Tipo: {', '.join(filtro_tipo_sel)}")
-        filtro_info = f" — Filtrado por: {' | '.join(partes)}"
+    # Botao limpar filtro
+    if filtro_info_partes or filtro_pronto_sel or filtro_tipo_sel or kpi_filtro:
+        if st.button("🧹 Limpar filtros", key="limpar_t2"):
+            st.session_state.pop('tab2_filtro', None)
+            st.rerun()
+
+    filtro_info = f" — Filtrado por: {' | '.join(filtro_info_partes)}" if filtro_info_partes else ""
     st.markdown(f"### 📋 Detalhes - Pedidos Em Aberto ({len(tabela_abertos)} itens){filtro_info}")
 
     if len(tabela_abertos) > 0:
@@ -1176,39 +1201,51 @@ with tab2:
 with tab3:
     abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
 
-    atrasados = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
+    atrasados_count = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
+    no_prazo_count = len(abertos[(abertos['Dias_Atraso_Cliente'] <= 0) & (abertos['Dias_Atraso_Cliente'].notna())])
+    sem_data_count = len(abertos[abertos['Dias_Atraso_Cliente'].isna()])
     media_atraso = abertos.loc[abertos['Dias_Atraso_Cliente'] > 0, 'Dias_Atraso_Cliente'].mean()
-    max_atraso = abertos['Dias_Atraso_Cliente'].max()
 
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(kpi_card(f"{atrasados}", "Pedidos Atrasados", "alert" if atrasados > 0 else "ok"), unsafe_allow_html=True)
-    c2.markdown(kpi_card(f"{media_atraso:.0f} dias" if pd.notna(media_atraso) else "0", "Media Atraso", "warn"), unsafe_allow_html=True)
-    c3.markdown(kpi_card(f"{max_atraso:.0f} dias" if pd.notna(max_atraso) else "0", "Maior Atraso", "alert"), unsafe_allow_html=True)
+    # KPIs como botoes clicaveis
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        if st.button(f"🔴 {atrasados_count}\nAtrasados", key="kpi_atrasados_t3", use_container_width=True):
+            st.session_state['tab3_filtro'] = 'atrasados'
+    with c2:
+        if st.button(f"✅ {no_prazo_count}\nNo Prazo", key="kpi_no_prazo_t3", use_container_width=True):
+            st.session_state['tab3_filtro'] = 'no_prazo'
+    with c3:
+        if st.button(f"⚠️ {sem_data_count}\nSem Data", key="kpi_sem_data_t3", use_container_width=True):
+            st.session_state['tab3_filtro'] = 'sem_data'
+    with c4:
+        st.markdown(kpi_card(f"{media_atraso:.0f} dias" if pd.notna(media_atraso) else "0", "Media Atraso", "warn"), unsafe_allow_html=True)
 
     st.markdown("")
 
     col1, col2 = st.columns(2)
 
+    filtro_semana_sel = []
+
     with col1:
-        # Pedidos por semana de entrega
         semana_data = abertos[abertos['Semana_Entrega'].notna()]
         if len(semana_data) > 0:
             sem_count = semana_data['Semana_Entrega'].value_counts().reset_index()
             sem_count.columns = ['Semana', 'Qtd']
             sem_count = sem_count.sort_values('Semana')
             fig = px.bar(sem_count, x='Semana', y='Qtd',
-                        title='Pedidos por Semana de Entrega (Pasta)',
+                        title='Pedidos por Semana de Entrega (clique para filtrar)',
                         color_discrete_sequence=[CORES['azul_claro']])
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            evento_semana = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="bar_semana_t3")
+            if evento_semana and evento_semana.selection and evento_semana.selection.points:
+                filtro_semana_sel = [p['x'] for p in evento_semana.selection.points if 'x' in p]
         else:
             st.info("Nenhum pedido com semana de entrega definida.")
 
     with col2:
-        # Top 10 mais atrasados
         top_atrasados = abertos.nlargest(10, 'Dias_Atraso_Cliente')[
             ['Num. Pedido', 'Produto', 'Dias_Atraso_Cliente']
         ].dropna(subset=['Dias_Atraso_Cliente'])
@@ -1225,16 +1262,41 @@ with tab3:
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # Tabela previsao
-    st.markdown("### 📋 Previsao de Entrega")
+    # Aplicar filtros
+    tabela_t3 = abertos.copy()
+    filtro_info_t3 = []
 
-    if len(abertos) > 0:
+    kpi_filtro_t3 = st.session_state.get('tab3_filtro')
+    if kpi_filtro_t3 == 'atrasados':
+        tabela_t3 = tabela_t3[tabela_t3['Dias_Atraso_Cliente'] > 0]
+        filtro_info_t3.append("Atrasados")
+    elif kpi_filtro_t3 == 'no_prazo':
+        tabela_t3 = tabela_t3[(tabela_t3['Dias_Atraso_Cliente'] <= 0) & (tabela_t3['Dias_Atraso_Cliente'].notna())]
+        filtro_info_t3.append("No Prazo")
+    elif kpi_filtro_t3 == 'sem_data':
+        tabela_t3 = tabela_t3[tabela_t3['Dias_Atraso_Cliente'].isna()]
+        filtro_info_t3.append("Sem Data")
+
+    if filtro_semana_sel:
+        tabela_t3 = tabela_t3[tabela_t3['Semana_Entrega'].isin(filtro_semana_sel)]
+        filtro_info_t3 = [f"Semana: {', '.join(filtro_semana_sel)}"]
+        st.session_state.pop('tab3_filtro', None)
+
+    if filtro_info_t3 or kpi_filtro_t3:
+        if st.button("🧹 Limpar filtros", key="limpar_t3"):
+            st.session_state.pop('tab3_filtro', None)
+            st.rerun()
+
+    info_t3 = f" — Filtrado por: {' | '.join(filtro_info_t3)}" if filtro_info_t3 else ""
+    st.markdown(f"### 📋 Previsao de Entrega ({len(tabela_t3)} itens){info_t3}")
+
+    if len(tabela_t3) > 0:
         ent_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Quantidade',
                    'Ped Cliente', 'DT. Fat. Cli', 'DT. Ofertada', 'Prazo_Real_Entrega',
                    'Semana_Entrega', 'FU_Dt_Chegada_Autron', 'Dias_Atraso_Cliente', 'Pronto_para_Fazer']
-        ent_cols = [c for c in ent_cols if c in abertos.columns]
+        ent_cols = [c for c in ent_cols if c in tabela_t3.columns]
 
-        ent_df = abertos[ent_cols].copy().sort_values('Dias_Atraso_Cliente', ascending=False)
+        ent_df = tabela_t3[ent_cols].copy().sort_values('Dias_Atraso_Cliente', ascending=False)
         rename_map = {
             'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
             'Quantidade': 'Qtd', 'Ped Cliente': 'Ped.Cliente',
@@ -1269,31 +1331,49 @@ with tab4:
     necessita_op = len(abertos[abertos['Acao_Necessaria'] == 'Necessario gerar OP'])
     erros = len(abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO'])
 
+    # KPIs como botoes clicaveis
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.markdown(kpi_card(f"{com_estoque}", "Com Estoque", "ok"), unsafe_allow_html=True)
-    c2.markdown(kpi_card(f"{parcial_est}", "Estoque Parcial", "warn"), unsafe_allow_html=True)
-    c3.markdown(kpi_card(f"{sem_estoque}", "Sem Estoque", "alert"), unsafe_allow_html=True)
-    c4.markdown(kpi_card(f"{necessita_sc}", "Necessitam SC", "alert" if necessita_sc > 0 else "ok"), unsafe_allow_html=True)
-    c5.markdown(kpi_card(f"{necessita_op}", "Necessitam OP", "alert" if necessita_op > 0 else "ok"), unsafe_allow_html=True)
-    c6.markdown(kpi_card(f"{erros}", "ERROS Cadastro", "alert" if erros > 0 else "ok"), unsafe_allow_html=True)
+    with c1:
+        if st.button(f"✅ {com_estoque}\nCom Estoque", key="kpi_com_est", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'SIM')
+    with c2:
+        if st.button(f"⚠️ {parcial_est}\nEstoque Parcial", key="kpi_parcial_est", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'PARCIAL')
+    with c3:
+        if st.button(f"🔴 {sem_estoque}\nSem Estoque", key="kpi_sem_est", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'NAO')
+    with c4:
+        if st.button(f"📋 {necessita_sc}\nNecessitam SC", key="kpi_nec_sc", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'Necessario gerar SC')
+    with c5:
+        if st.button(f"🏭 {necessita_op}\nNecessitam OP", key="kpi_nec_op", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'Necessario gerar OP')
+    with c6:
+        if st.button(f"❌ {erros}\nERROS Cadastro", key="kpi_erros_t4", use_container_width=True):
+            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'ERRO no CADASTRO')
 
     st.markdown("")
 
     col1, col2 = st.columns(2)
 
+    filtro_est_sel = []
+    filtro_acao_sel = []
+
     with col1:
         if len(abertos) > 0:
             est_count = abertos['Disponivel_Estoque'].value_counts().reset_index()
             est_count.columns = ['Disponibilidade', 'Qtd']
-            cores_est = {'SIM': CORES['verde'], 'NAO': CORES['vermelho'], 'PARCIAL': CORES['amarelo']}
+            cores_est = {'SIM': CORES['verde'], 'NAO': CORES['vermelho'], 'PARCIAL': CORES['amarelo'], 'Serviço': CORES['amarelo']}
             fig = px.pie(est_count, values='Qtd', names='Disponibilidade',
-                        title='Disponibilidade de Estoque',
+                        title='Disponibilidade de Estoque (clique para filtrar)',
                         color='Disponibilidade', color_discrete_map=cores_est, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=380
             )
-            st.plotly_chart(fig, use_container_width=True)
+            evento_est = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="pie_estoque_t4")
+            if evento_est and evento_est.selection and evento_est.selection.points:
+                filtro_est_sel = [p['label'] for p in evento_est.selection.points if 'label' in p]
 
     with col2:
         if len(abertos) > 0:
@@ -1306,28 +1386,57 @@ with tab4:
                 'SC gerada - Aguardando': CORES['amarelo'],
                 'OP gerada - Aguardando': '#F1C40F',
                 'ERRO no CADASTRO': CORES['vermelho_escuro'],
+                'Prazo a confirmar': CORES['amarelo'],
                 'Verificar classificacao': CORES['cinza']
             }
             fig2 = px.bar(acao_count, x='Acao', y='Qtd',
-                         title='Acoes Necessarias',
+                         title='Acoes Necessarias (clique para filtrar)',
                          color='Acao', color_discrete_map=cores_acao)
             fig2.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=380, showlegend=False,
                 xaxis_title='', yaxis_title='Quantidade'
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            evento_acao = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_acao_t4")
+            if evento_acao and evento_acao.selection and evento_acao.selection.points:
+                filtro_acao_sel = [p['x'] for p in evento_acao.selection.points if 'x' in p]
 
-    # Tabela estoque
-    st.markdown("### 📋 Detalhe Estoque & SC/OP")
+    # Aplicar filtros: KPI button OU clique no grafico
+    tabela_t4 = abertos.copy()
+    filtro_info_t4 = []
 
-    if len(abertos) > 0:
+    # Filtro via KPI button
+    kpi_filtro_t4 = st.session_state.get('tab4_filtro')
+    if kpi_filtro_t4:
+        campo, valor = kpi_filtro_t4
+        tabela_t4 = tabela_t4[tabela_t4[campo] == valor]
+        filtro_info_t4.append(f"{valor}")
+
+    # Filtro via clique no grafico (sobrepoe KPI)
+    if filtro_est_sel:
+        tabela_t4 = abertos[abertos['Disponivel_Estoque'].isin(filtro_est_sel)]
+        filtro_info_t4 = [f"Estoque: {', '.join(filtro_est_sel)}"]
+        st.session_state.pop('tab4_filtro', None)
+    if filtro_acao_sel:
+        tabela_t4 = tabela_t4[tabela_t4['Acao_Necessaria'].isin(filtro_acao_sel)]
+        filtro_info_t4.append(f"Acao: {', '.join(filtro_acao_sel)}")
+        st.session_state.pop('tab4_filtro', None)
+
+    if filtro_info_t4 or kpi_filtro_t4:
+        if st.button("🧹 Limpar filtros", key="limpar_t4"):
+            st.session_state.pop('tab4_filtro', None)
+            st.rerun()
+
+    info_t4 = f" — Filtrado por: {' | '.join(filtro_info_t4)}" if filtro_info_t4 else ""
+    st.markdown(f"### 📋 Detalhe Estoque & SC/OP ({len(tabela_t4)} itens){info_t4}")
+
+    if len(tabela_t4) > 0:
         est_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
                    'Quantidade', 'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
                    'Acao_Necessaria', 'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'DT Emissao']
-        est_cols = [c for c in est_cols if c in abertos.columns]
+        est_cols = [c for c in est_cols if c in tabela_t4.columns]
 
-        est_df = abertos[est_cols].copy().sort_values(['Produto', 'DT Emissao'])
+        est_df = tabela_t4[est_cols].copy().sort_values(['Produto', 'DT Emissao'])
         rename_est = {
             'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
             'Tipo_Produto': 'Tipo', 'Quantidade': 'Qtd Pedida',
@@ -1341,6 +1450,7 @@ with tab4:
         def color_acao_tab(val):
             if val == 'ERRO no CADASTRO': return 'background-color: #C0392B; color: white; font-weight: bold'
             elif val == 'Estoque OK': return 'background-color: #1a3a1a; color: #2ECC71'
+            elif val == 'Prazo a confirmar': return 'background-color: #3a3a1a; color: #F39C12'
             elif 'Necessario' in str(val): return 'background-color: #3a1a1a; color: #E74C3C'
             elif 'gerada' in str(val): return 'background-color: #3a3a1a; color: #F39C12'
             return ''
@@ -1352,7 +1462,7 @@ with tab4:
         st.dataframe(styled, use_container_width=True, height=500)
 
     # Alertas de erro
-    erros_df = abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO']
+    erros_df = tabela_t4[tabela_t4['Acao_Necessaria'] == 'ERRO no CADASTRO'] if len(tabela_t4) > 0 else pd.DataFrame()
     if len(erros_df) > 0:
         st.markdown("### ⚠️ ERROS DE CADASTRO - Item Comprando com OP")
         st.error(f"Foram encontrados {len(erros_df)} itens classificados como 'Comprando' que possuem OP gerada. Verificar cadastro!")
