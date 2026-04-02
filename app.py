@@ -1076,6 +1076,10 @@ with tab2:
 
     st.markdown("")
 
+    # Filtro interativo por clique no grafico
+    pronto_opcoes = sorted(abertos['Pronto_para_Fazer'].unique()) if len(abertos) > 0 else []
+    tipo_opcoes = sorted(abertos['Tipo_Produto'].unique()) if len(abertos) > 0 else []
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -1096,6 +1100,12 @@ with tab2:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+            # Seletor para filtrar tabela (simula clique na fatia)
+            filtro_pronto = st.multiselect(
+                "Filtrar por Pronto p/ Fazer:",
+                options=pronto_opcoes, default=[], key='filtro_pronto_tab2'
+            )
+
     with col2:
         if len(abertos) > 0:
             tipo_count = abertos['Tipo_Produto'].value_counts().reset_index()
@@ -1111,16 +1121,35 @@ with tab2:
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # Tabela detalhada
-    st.markdown("### 📋 Detalhes - Pedidos Em Aberto")
+            # Seletor para filtrar tabela por tipo
+            filtro_tipo = st.multiselect(
+                "Filtrar por Tipo:",
+                options=tipo_opcoes, default=[], key='filtro_tipo_tab2'
+            )
 
-    if len(abertos) > 0:
+    # Aplicar filtros dos graficos na tabela
+    tabela_abertos = abertos.copy()
+    if filtro_pronto:
+        tabela_abertos = tabela_abertos[tabela_abertos['Pronto_para_Fazer'].isin(filtro_pronto)]
+    if filtro_tipo:
+        tabela_abertos = tabela_abertos[tabela_abertos['Tipo_Produto'].isin(filtro_tipo)]
+
+    # Tabela detalhada
+    filtro_info = ""
+    if filtro_pronto or filtro_tipo:
+        partes = []
+        if filtro_pronto: partes.append(f"Pronto: {', '.join(filtro_pronto)}")
+        if filtro_tipo: partes.append(f"Tipo: {', '.join(filtro_tipo)}")
+        filtro_info = f" — Filtrado por: {' | '.join(partes)}"
+    st.markdown(f"### 📋 Detalhes - Pedidos Em Aberto ({len(tabela_abertos)} itens){filtro_info}")
+
+    if len(tabela_abertos) > 0:
         tab_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
                    'Quantidade', 'Pronto_para_Fazer', 'Disponivel_Estoque', 'Acao_Necessaria',
                    'Prazo_Real_Entrega', 'Semana_Entrega', 'Ped Cliente']
-        tab_cols = [c for c in tab_cols if c in abertos.columns]
+        tab_cols = [c for c in tab_cols if c in tabela_abertos.columns]
 
-        display_df = abertos[tab_cols].copy()
+        display_df = tabela_abertos[tab_cols].copy()
         display_df.columns = ['PV', 'Item', 'Produto', 'Descricao', 'Tipo',
                              'Qtd', 'Pronto?', 'Estoque', 'Acao',
                              'Prazo Entrega', 'Semana', 'Ped Cliente'][:len(tab_cols)]
@@ -1134,6 +1163,7 @@ with tab2:
         def color_acao(val):
             if val == 'ERRO no CADASTRO': return 'background-color: #C0392B; color: white; font-weight: bold'
             elif val == 'Estoque OK': return 'background-color: #1a3a1a; color: #2ECC71'
+            elif val == 'Prazo a confirmar': return 'background-color: #3a3a1a; color: #F39C12'
             elif 'Necessario' in str(val): return 'background-color: #3a1a1a; color: #E74C3C'
             elif 'gerada' in str(val): return 'background-color: #3a3a1a; color: #F39C12'
             return ''
@@ -1345,16 +1375,17 @@ if tab5 is not None:
         fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto'), errors='coerce')
         fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido'), errors='coerce')
         fat['Margem Liquida (R$)'] = pd.to_numeric(fat.get('Margem Liquida (R$)'), errors='coerce')
+        fat['Margem Liquida (%)'] = pd.to_numeric(fat.get('Margem Liquida (%) por NF Faturada'), errors='coerce')
 
         fat_bruto = fat['Faturamento Bruto'].sum()
         fat_liq = fat['Faturamento Liquido'].sum()
-        fat_margem = fat['Margem Liquida (R$)'].sum()
+        fat_margem_pct = fat['Margem Liquida (%)'].mean()
         fat_nfs = fat['Num. Docto.'].nunique() if 'Num. Docto.' in fat.columns else 0
 
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(kpi_card(f"R$ {fat_bruto:,.0f}", "Faturamento Bruto"), unsafe_allow_html=True)
         c2.markdown(kpi_card(f"R$ {fat_liq:,.0f}", "Faturamento Liquido", "ok"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {fat_margem:,.0f}", "Margem Liquida", "warn"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{fat_margem_pct:.1f}%", "Margem Liquida Media", "ok" if fat_margem_pct >= 30 else "warn"), unsafe_allow_html=True)
         c4.markdown(kpi_card(f"{fat_nfs}", "Notas Fiscais"), unsafe_allow_html=True)
 
         st.markdown("")
@@ -1392,6 +1423,9 @@ if tab5 is not None:
         fat_display_cols = [c for c in ['Emissao', 'Num. Docto.', 'No do Pedido', 'Produto',
             'Descricao Produto', 'Quantidade', 'Razao Social', 'Nome Fantasia', 'UF',
             'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
+            'Margem Liquida (%) por NF Faturada',
             'Nome do Vendedor', 'Tipo Negocio'] if c in fat.columns]
         fat_table = fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
+        # Renomear para exibicao
+        fat_table = fat_table.rename(columns={'Margem Liquida (%) por NF Faturada': 'Margem Liquida (%)'})
         st.dataframe(fat_table, use_container_width=True, height=500)
