@@ -1481,6 +1481,7 @@ if tab5 is not None:
         fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido'), errors='coerce')
         fat['Margem Liquida (R$)'] = pd.to_numeric(fat.get('Margem Liquida (R$)'), errors='coerce')
         fat['Margem Liquida (%)'] = pd.to_numeric(fat.get('Margem Liquida (%) por NF Faturada'), errors='coerce')
+        fat['Mes_Fat'] = fat['Emissao'].dt.to_period('M').astype(str)
 
         fat_bruto = fat['Faturamento Bruto'].sum()
         fat_liq = fat['Faturamento Liquido'].sum()
@@ -1497,18 +1498,22 @@ if tab5 is not None:
 
         col1, col2 = st.columns(2)
 
+        filtro_mes_fat = []
+        filtro_vend_fat = []
+
         with col1:
-            fat['Mes_Fat'] = fat['Emissao'].dt.to_period('M').astype(str)
             fat_mes = fat.groupby('Mes_Fat').agg({'Faturamento Liquido': 'sum'}).reset_index()
             fat_mes = fat_mes.sort_values('Mes_Fat')
             fig = px.bar(fat_mes, x='Mes_Fat', y='Faturamento Liquido',
-                        title='Faturamento Liquido por Mes',
+                        title='Faturamento Liquido por Mes (clique para filtrar)',
                         color_discrete_sequence=[CORES['verde']])
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            evento_mes_fat = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="bar_mes_fat")
+            if evento_mes_fat and evento_mes_fat.selection and evento_mes_fat.selection.points:
+                filtro_mes_fat = [p['x'] for p in evento_mes_fat.selection.points if 'x' in p]
 
         with col2:
             if 'Nome do Vendedor' in fat.columns:
@@ -1516,21 +1521,52 @@ if tab5 is not None:
                     {'Faturamento Liquido': 'sum'}
                 ).reset_index().sort_values('Faturamento Liquido', ascending=True).tail(10)
                 fig2 = px.bar(fat_vend, x='Faturamento Liquido', y='Nome do Vendedor',
-                             title='Top 10 Vendedores - Faturamento Liquido',
+                             title='Top 10 Vendedores (clique para filtrar)',
                              orientation='h', color_discrete_sequence=[CORES['azul_claro']])
                 fig2.update_layout(
                     plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                     font_color='#E0E0E0', yaxis_title='', xaxis_title='R$', height=400
                 )
-                st.plotly_chart(fig2, use_container_width=True)
+                evento_vend = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_vend_fat")
+                if evento_vend and evento_vend.selection and evento_vend.selection.points:
+                    filtro_vend_fat = [p['y'] for p in evento_vend.selection.points if 'y' in p]
 
-        st.markdown("### 📋 Detalhe do Faturamento")
+        # Aplicar filtros
+        tabela_fat = fat.copy()
+        filtro_info_fat = []
+
+        if filtro_vend_fat:
+            tabela_fat = tabela_fat[tabela_fat['Nome do Vendedor'].isin(filtro_vend_fat)]
+            filtro_info_fat.append(f"Vendedor: {', '.join(filtro_vend_fat)}")
+        if filtro_mes_fat:
+            tabela_fat = tabela_fat[tabela_fat['Mes_Fat'].isin(filtro_mes_fat)]
+            filtro_info_fat.append(f"Mes: {', '.join(filtro_mes_fat)}")
+
+        if filtro_info_fat:
+            # KPIs atualizados para o filtro
+            fat_bruto_f = tabela_fat['Faturamento Bruto'].sum()
+            fat_liq_f = tabela_fat['Faturamento Liquido'].sum()
+            fat_margem_f = tabela_fat['Margem Liquida (%)'].mean()
+            fat_nfs_f = tabela_fat['Num. Docto.'].nunique() if 'Num. Docto.' in tabela_fat.columns else 0
+
+            st.markdown("#### 📊 Resumo do filtro aplicado")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.markdown(kpi_card(f"R$ {fat_bruto_f:,.0f}", "Fat. Bruto (filtrado)"), unsafe_allow_html=True)
+            r2.markdown(kpi_card(f"R$ {fat_liq_f:,.0f}", "Fat. Liquido (filtrado)", "ok"), unsafe_allow_html=True)
+            r3.markdown(kpi_card(f"{fat_margem_f:.1f}%" if pd.notna(fat_margem_f) else "N/A", "Margem Media (filtrado)", "ok" if pd.notna(fat_margem_f) and fat_margem_f >= 30 else "warn"), unsafe_allow_html=True)
+            r4.markdown(kpi_card(f"{fat_nfs_f}", "NFs (filtrado)"), unsafe_allow_html=True)
+
+            if st.button("🧹 Limpar filtros", key="limpar_t5"):
+                st.rerun()
+
+        info_fat = f" — Filtrado por: {' | '.join(filtro_info_fat)}" if filtro_info_fat else ""
+        st.markdown(f"### 📋 Detalhe do Faturamento ({len(tabela_fat)} itens){info_fat}")
+
         fat_display_cols = [c for c in ['Emissao', 'Num. Docto.', 'No do Pedido', 'Produto',
             'Descricao Produto', 'Quantidade', 'Razao Social', 'Nome Fantasia', 'UF',
             'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
             'Margem Liquida (%) por NF Faturada',
-            'Nome do Vendedor', 'Tipo Negocio'] if c in fat.columns]
-        fat_table = fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
-        # Renomear para exibicao
+            'Nome do Vendedor', 'Tipo Negocio'] if c in tabela_fat.columns]
+        fat_table = tabela_fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
         fat_table = fat_table.rename(columns={'Margem Liquida (%) por NF Faturada': 'Margem Liquida (%)'})
         st.dataframe(fat_table, use_container_width=True, height=500)
