@@ -552,8 +552,10 @@ def gerar_excel_consolidado(df, fat=None):
     headers = [header_map.get(c, c) for c in cols]
     output = df[cols].copy().sort_values(['Status_Pedido', 'DT Emissao', 'Num. Pedido', 'Item'])
 
-    date_cols = {'DT Emissao', 'DT. Ofertada', 'DT. Fat. Cli', 'Prazo_Real_Entrega',
+    date_cols = {'DT Emissao', 'DT. Ofertada', 'DT. Fat. Cli',
                  'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'FU_Dt_Chegada_Autron'}
+    # Prazo_Real_Entrega pode ser data ou string ("A definir"), tratar separadamente
+    date_or_str_cols = {'Prazo_Real_Entrega'}
     col_idx_map = {c: i for i, c in enumerate(cols)}
 
     # --- Aba Pedidos_Consolidado ---
@@ -577,13 +579,14 @@ def gerar_excel_consolidado(df, fat=None):
             cell.font = data_font
             cell.border = thin_border
             if col_name in date_cols and val is not None: cell.number_format = 'DD/MM/YYYY'
+            elif col_name in date_or_str_cols and isinstance(val, pd.Timestamp): cell.number_format = 'DD/MM/YYYY'
             elif col_name == 'Margem' and val is not None: cell.number_format = '0.00%'
             elif col_name in ('Prc Unitario', 'Vlr.Total') and val is not None: cell.number_format = '#,##0.00'
 
         # Cores condicionais
         for field, fills in [
             ('Status_Pedido', {'FINALIZADO': fill_verde, 'EM ABERTO': fill_vermelho}),
-            ('Disponivel_Estoque', {'SIM': fill_verde, 'PARCIAL': fill_amarelo, 'NAO': fill_vermelho}),
+            ('Disponivel_Estoque', {'SIM': fill_verde, 'PARCIAL': fill_amarelo, 'NAO': fill_vermelho, 'Serviço': fill_amarelo}),
         ]:
             idx = col_idx_map.get(field)
             if idx is not None:
@@ -605,6 +608,7 @@ def gerar_excel_consolidado(df, fat=None):
             v = c.value
             if v == 'ERRO no CADASTRO': c.fill = fill_erro; c.font = font_erro
             elif v == 'Estoque OK': c.fill = fill_verde
+            elif v == 'Prazo a confirmar': c.fill = fill_amarelo
             elif v and 'Necessario' in str(v): c.fill = fill_vermelho
             elif v and ('gerada' in str(v) or 'Aguardando' in str(v)): c.fill = fill_amarelo
 
@@ -644,9 +648,11 @@ def gerar_excel_consolidado(df, fat=None):
         if c.value == 'SIM': c.fill = fill_verde
         elif c.value == 'PARCIAL': c.fill = fill_amarelo
         elif c.value == 'NAO': c.fill = fill_vermelho
+        elif c.value == 'Serviço': c.fill = fill_amarelo
         c2 = ws2.cell(row=ri, column=10)
         if c2.value == 'ERRO no CADASTRO': c2.fill = fill_erro; c2.font = font_erro
         elif c2.value == 'Estoque OK': c2.fill = fill_verde
+        elif c2.value == 'Prazo a confirmar': c2.fill = fill_amarelo
         elif c2.value and 'Necessario' in str(c2.value): c2.fill = fill_vermelho
         elif c2.value and 'gerada' in str(c2.value): c2.fill = fill_amarelo
     for ci in range(1, len(headers2) + 1):
