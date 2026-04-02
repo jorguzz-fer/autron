@@ -1076,11 +1076,10 @@ with tab2:
 
     st.markdown("")
 
-    # Filtro interativo por clique no grafico
-    pronto_opcoes = sorted(abertos['Pronto_para_Fazer'].unique()) if len(abertos) > 0 else []
-    tipo_opcoes = sorted(abertos['Tipo_Produto'].unique()) if len(abertos) > 0 else []
-
     col1, col2 = st.columns(2)
+
+    filtro_pronto_sel = []
+    filtro_tipo_sel = []
 
     with col1:
         if len(abertos) > 0:
@@ -1092,26 +1091,24 @@ with tab2:
                 'PARCIAL - Sem Estoque': '#E67E22'
             }
             fig = px.pie(pronto_count, values='Qtd', names='Status',
-                        title='Distribuicao - Pronto p/ Fazer?',
+                        title='Distribuicao - Pronto p/ Fazer? (clique para filtrar)',
                         color='Status', color_discrete_map=cores_pronto, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            evento_pronto = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="pie_pronto")
 
-            # Seletor para filtrar tabela (simula clique na fatia)
-            filtro_pronto = st.multiselect(
-                "Filtrar por Pronto p/ Fazer:",
-                options=pronto_opcoes, default=[], key='filtro_pronto_tab2'
-            )
+            # Extrair fatia(s) clicada(s)
+            if evento_pronto and evento_pronto.selection and evento_pronto.selection.points:
+                filtro_pronto_sel = [p['label'] for p in evento_pronto.selection.points if 'label' in p]
 
     with col2:
         if len(abertos) > 0:
             tipo_count = abertos['Tipo_Produto'].value_counts().reset_index()
             tipo_count.columns = ['Tipo', 'Qtd']
             fig2 = px.bar(tipo_count, x='Tipo', y='Qtd',
-                         title='Comprando vs Produzindo (Em Aberto)',
+                         title='Comprando vs Produzindo (clique para filtrar)',
                          color='Tipo',
                          color_discrete_map={'Comprando': CORES['azul_claro'], 'Produzindo': CORES['amarelo'],
                                            'Nao classificado': CORES['cinza']})
@@ -1119,27 +1116,25 @@ with tab2:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400, showlegend=False
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            evento_tipo = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_tipo")
 
-            # Seletor para filtrar tabela por tipo
-            filtro_tipo = st.multiselect(
-                "Filtrar por Tipo:",
-                options=tipo_opcoes, default=[], key='filtro_tipo_tab2'
-            )
+            # Extrair barra(s) clicada(s)
+            if evento_tipo and evento_tipo.selection and evento_tipo.selection.points:
+                filtro_tipo_sel = [p['x'] for p in evento_tipo.selection.points if 'x' in p]
 
-    # Aplicar filtros dos graficos na tabela
+    # Aplicar filtros dos cliques nos graficos
     tabela_abertos = abertos.copy()
-    if filtro_pronto:
-        tabela_abertos = tabela_abertos[tabela_abertos['Pronto_para_Fazer'].isin(filtro_pronto)]
-    if filtro_tipo:
-        tabela_abertos = tabela_abertos[tabela_abertos['Tipo_Produto'].isin(filtro_tipo)]
+    if filtro_pronto_sel:
+        tabela_abertos = tabela_abertos[tabela_abertos['Pronto_para_Fazer'].isin(filtro_pronto_sel)]
+    if filtro_tipo_sel:
+        tabela_abertos = tabela_abertos[tabela_abertos['Tipo_Produto'].isin(filtro_tipo_sel)]
 
     # Tabela detalhada
     filtro_info = ""
-    if filtro_pronto or filtro_tipo:
+    if filtro_pronto_sel or filtro_tipo_sel:
         partes = []
-        if filtro_pronto: partes.append(f"Pronto: {', '.join(filtro_pronto)}")
-        if filtro_tipo: partes.append(f"Tipo: {', '.join(filtro_tipo)}")
+        if filtro_pronto_sel: partes.append(f"Pronto: {', '.join(filtro_pronto_sel)}")
+        if filtro_tipo_sel: partes.append(f"Tipo: {', '.join(filtro_tipo_sel)}")
         filtro_info = f" — Filtrado por: {' | '.join(partes)}"
     st.markdown(f"### 📋 Detalhes - Pedidos Em Aberto ({len(tabela_abertos)} itens){filtro_info}")
 
