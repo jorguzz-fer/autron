@@ -271,7 +271,7 @@ def carregar_e_processar():
 
     arq_entrada = os.path.join(DATA_DIR, "entrada_pedido.xlsx")
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
-    arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
+    arq_estoque = os.path.join(DATA_DIR, "matr260.xlsx")
     arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
 
     # CSV pode ter nomes diferentes
@@ -288,15 +288,8 @@ def carregar_e_processar():
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
 
-    # mata010 - detectar header automaticamente (pode estar na linha 0 ou 6)
-    mt_raw = pd.read_excel(arq_estoque, header=None, nrows=10)
-    header_row = 0
-    for i in range(10):
-        row_vals = [str(v) for v in mt_raw.iloc[i].tolist() if pd.notna(v)]
-        if 'Codigo' in row_vals:
-            header_row = i
-            break
-    mt = pd.read_excel(arq_estoque, header=header_row)
+    # MATR260 - header fixo na linha 6
+    mt = pd.read_excel(arq_estoque, header=6)
 
     sc_csv = pd.read_csv(arq_scio, encoding='latin-1', sep=';', header=2, low_memory=False)
 
@@ -319,6 +312,9 @@ def carregar_e_processar():
     if 'Numero OP' not in ep.columns:
         ep['Numero OP'] = np.nan
 
+    # Filtrar PVs que iniciam com I ou B (desconsiderar completamente)
+    ep = ep[~ep['Num. Pedido'].str.upper().str.match(r'^[IB]', na=False)]
+
     # Limpar follow-up
     fu['No. da S.C.'] = pd.to_numeric(fu['No. da S.C.'], errors='coerce')
     fu['Dt. Confirma'] = pd.to_datetime(fu['Dt. Confirma'], errors='coerce')
@@ -329,8 +325,8 @@ def carregar_e_processar():
     if 'OP na SC' not in fu.columns:
         fu['OP na SC'] = np.nan
 
-    # Limpar estoque
-    mt['Saldo Atual'] = pd.to_numeric(mt['Saldo Atual'], errors='coerce').fillna(0)
+    # Limpar estoque (MATR260)
+    mt['SALDO EM ESTOQUE'] = pd.to_numeric(mt['SALDO EM ESTOQUE'], errors='coerce').fillna(0)
 
     # Classificacao Comprando/Produzindo
     sc_csv['Produto'] = sc_csv['Produto'].astype(str).str.strip()
@@ -373,7 +369,7 @@ def carregar_e_processar():
     merged['FU_Dt_Chegada_Autron'] = merged['Dt Chegada Autron'].combine_first(merged['FU_Dt_Chegada_PV'])
     merged['FU_OP_na_SC'] = merged['OP na SC'].combine_first(merged['FU_OP_na_SC_PV'])
 
-    merged['Prazo_Real_Entrega'] = merged['FU_Dt_Confirma'].combine_first(merged['FU_Dt_Pre_Entr'])
+    merged['Prazo_Real_Entrega'] = merged['FU_Dt_Confirma'].combine_first(merged['FU_Dt_Pre_Entr']).astype(object)
     merged['Semana_Entrega'] = np.where(merged['FU_Dt_Confirma'].notna(), merged['FU_Pasta'], None)
 
     # Tipo produto
@@ -383,9 +379,9 @@ def carregar_e_processar():
     # Status
     merged['Status_Pedido'] = np.where(merged['Nota Fiscal'].notna(), 'FINALIZADO', 'EM ABERTO')
 
-    # Estoque
-    stock = mt.groupby('Codigo')['Saldo Atual'].sum().reset_index()
-    stock.rename(columns={'Codigo': 'Produto', 'Saldo Atual': 'Estoque_Disponivel'}, inplace=True)
+    # Estoque (MATR260)
+    stock = mt.groupby('CODIGO')['SALDO EM ESTOQUE'].sum().reset_index()
+    stock.rename(columns={'CODIGO': 'Produto', 'SALDO EM ESTOQUE': 'Estoque_Disponivel'}, inplace=True)
     merged = merged.merge(stock, on='Produto', how='left')
     merged['Estoque_Disponivel'] = merged['Estoque_Disponivel'].fillna(0)
 
@@ -411,6 +407,24 @@ def carregar_e_processar():
     merged.loc[merged['Status_Pedido'] == 'FINALIZADO', 'Disponivel_Estoque'] = 'N/A'
     merged.loc[merged['Status_Pedido'] == 'FINALIZADO', 'Qtd_Alocada'] = None
 
+    # Identificar itens de servico pela descricao (contem "servico" ou "serviço")
+    merged['_eh_servico'] = merged['Descricao do Produto'].astype(str).str.lower().str.contains(
+        r'servi[cç]o', regex=True, na=False
+    )
+    # Para servicos: disponibilidade = "Serviço", sem alocacao de estoque
+    merged.loc[merged['_eh_servico'] & (merged['Status_Pedido'] == 'EM ABERTO'), 'Disponivel_Estoque'] = 'Serviço'
+    merged.loc[merged['_eh_servico'] & (merged['Status_Pedido'] == 'EM ABERTO'), 'Qtd_Alocada'] = None
+
+    # IND21 com "posto" ou "cabine" na descricao: prazo "A definir"
+    _eh_ind21_posto_cabine = (
+        merged['Unidade Negocio'].astype(str).str.strip().str.upper().eq('IND21') &
+        merged['Descricao do Produto'].astype(str).str.lower().str.contains(r'posto|cabine', regex=True, na=False) &
+        (merged['Status_Pedido'] == 'EM ABERTO')
+    )
+    merged.loc[_eh_ind21_posto_cabine, 'Prazo_Real_Entrega'] = 'A definir'
+    merged.loc[_eh_ind21_posto_cabine, 'FU_Dt_Confirma'] = None
+    merged.loc[_eh_ind21_posto_cabine, 'FU_Dt_Pre_Entr'] = None
+
     # Regras SC/OP
     merged['Tem_SC'] = merged['Numero SC'].notna()
     merged['Tem_OP'] = (
@@ -421,6 +435,8 @@ def carregar_e_processar():
     def gerar_acao(row):
         if row['Status_Pedido'] == 'FINALIZADO':
             return 'Finalizado'
+        if row.get('_eh_servico', False):
+            return 'Prazo a confirmar'
         if row['Disponivel_Estoque'] == 'SIM':
             return 'Estoque OK'
         tipo = str(row.get('Tipo_Produto', '')).strip()
@@ -687,7 +703,7 @@ def gerar_excel_consolidado(df, fat=None):
 # UPLOAD E GESTAO DE ARQUIVOS
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
-ARQUIVOS_OBRIGATORIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx']
+ARQUIVOS_OBRIGATORIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'matr260.xlsx']
 ARQUIVOS_CSV = ['sciozvs0.csv', 'sciozmq0.csv']  # aceita qualquer um dos dois
 ARQUIVO_OPCIONAL = 'faturamento.xlsx'
 
@@ -769,9 +785,9 @@ def tela_upload():
         )
     with col2:
         up_mata = st.file_uploader(
-            "📦 mata010.xlsx",
+            "📦 matr260.xlsx",
             type=['xlsx'], key='up_mata',
-            help="Relatorio de estoque (MATA010)"
+            help="Relatorio de estoque (MATR260)"
         )
         up_scio = st.file_uploader(
             "🏭 sciozvs0.csv / sciozmq0.csv",
@@ -782,7 +798,7 @@ def tela_upload():
     uploads = {
         'entrada_pedido.xlsx': up_entrada,
         'followup.xlsx': up_followup,
-        'mata010.xlsx': up_mata,
+        'matr260.xlsx': up_mata,
     }
 
     # Salvar arquivos enviados
