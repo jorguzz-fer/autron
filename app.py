@@ -508,7 +508,7 @@ def gerar_excel_consolidado(df, fat=None):
         'Num. Pedido', 'Item', 'Cliente', 'Razao Social', 'Nome Fantasia',
         'Produto', 'Descricao do Produto', 'Tipo_Produto', 'Quantidade',
         'Prc Unitario', 'Vlr.Total', 'Margem',
-        'DT Emissao', 'Mes_Emissao', 'Ano_Emissao',
+        'DT Emissao', 'Entrega', 'Mes_Emissao', 'Ano_Emissao',
         'DT. Ofertada', 'DT. Fat. Cli', 'Ped Cliente',
         'Prazo_Real_Entrega', 'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Semana_Entrega',
         'FU_Dt_Chegada_Autron', 'FU_PO', 'FU_OP_na_SC',
@@ -527,7 +527,8 @@ def gerar_excel_consolidado(df, fat=None):
         'Produto': 'Codigo Produto', 'Descricao do Produto': 'Descricao Produto',
         'Tipo_Produto': 'Tipo (Comprando/Produzindo)',
         'Quantidade': 'Qtd', 'Prc Unitario': 'Preco Unit.', 'Vlr.Total': 'Valor Total',
-        'Margem': 'Margem %', 'DT Emissao': 'Data Emissao', 'Mes_Emissao': 'Mes Emissao',
+        'Margem': 'Margem %', 'DT Emissao': 'Data Emissao', 'Entrega': 'Entrega',
+        'Mes_Emissao': 'Mes Emissao',
         'Ano_Emissao': 'Ano Emissao', 'DT. Ofertada': 'Data Ofertada',
         'DT. Fat. Cli': 'Data Solicitada Cliente', 'Ped Cliente': 'Pedido Cliente',
         'Prazo_Real_Entrega': 'Prazo Real Entrega', 'FU_Dt_Confirma': 'Follow-Up Dt Confirmada',
@@ -552,7 +553,7 @@ def gerar_excel_consolidado(df, fat=None):
     headers = [header_map.get(c, c) for c in cols]
     output = df[cols].copy().sort_values(['Status_Pedido', 'DT Emissao', 'Num. Pedido', 'Item'])
 
-    date_cols = {'DT Emissao', 'DT. Ofertada', 'DT. Fat. Cli',
+    date_cols = {'DT Emissao', 'Entrega', 'DT. Ofertada', 'DT. Fat. Cli',
                  'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'FU_Dt_Chegada_Autron'}
     # Prazo_Real_Entrega pode ser data ou string ("A definir"), tratar separadamente
     date_or_str_cols = {'Prazo_Real_Entrega'}
