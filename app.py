@@ -1062,6 +1062,7 @@ with tab1:
 # ===== ABA 2: PRONTIDAO =====
 with tab2:
     abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    _t2r = st.session_state.get('tab2_reset', 0)
 
     prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'SIM'])
     parciais = len(abertos[abertos['Pronto_para_Fazer'].str.contains('PARCIAL', na=False)])
@@ -1106,7 +1107,7 @@ with tab2:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            evento_pronto = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="pie_pronto")
+            evento_pronto = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"pie_pronto_{_t2r}")
 
             if evento_pronto and evento_pronto.selection and evento_pronto.selection.points:
                 filtro_pronto_sel = [p['label'] for p in evento_pronto.selection.points if 'label' in p]
@@ -1124,7 +1125,7 @@ with tab2:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400, showlegend=False
             )
-            evento_tipo = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_tipo")
+            evento_tipo = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_tipo_{_t2r}")
 
             if evento_tipo and evento_tipo.selection and evento_tipo.selection.points:
                 filtro_tipo_sel = [p['x'] for p in evento_tipo.selection.points if 'x' in p]
@@ -1158,6 +1159,7 @@ with tab2:
     if filtro_info_partes or filtro_pronto_sel or filtro_tipo_sel or kpi_filtro:
         if st.button("🧹 Limpar filtros", key="limpar_t2"):
             st.session_state.pop('tab2_filtro', None)
+            st.session_state['tab2_reset'] = _t2r + 1
             st.rerun()
 
     filtro_info = f" — Filtrado por: {' | '.join(filtro_info_partes)}" if filtro_info_partes else ""
@@ -1200,6 +1202,7 @@ with tab2:
 # ===== ABA 3: PREVISAO ENTREGA =====
 with tab3:
     abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    _t3r = st.session_state.get('tab3_reset', 0)
 
     atrasados_count = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
     no_prazo_count = len(abertos[(abertos['Dias_Atraso_Cliente'] <= 0) & (abertos['Dias_Atraso_Cliente'].notna())])
@@ -1239,7 +1242,7 @@ with tab3:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            evento_semana = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="bar_semana_t3")
+            evento_semana = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"bar_semana_t3_{_t3r}")
             if evento_semana and evento_semana.selection and evento_semana.selection.points:
                 filtro_semana_sel = [p['x'] for p in evento_semana.selection.points if 'x' in p]
         else:
@@ -1285,6 +1288,7 @@ with tab3:
     if filtro_info_t3 or kpi_filtro_t3:
         if st.button("🧹 Limpar filtros", key="limpar_t3"):
             st.session_state.pop('tab3_filtro', None)
+            st.session_state['tab3_reset'] = _t3r + 1
             st.rerun()
 
     info_t3 = f" — Filtrado por: {' | '.join(filtro_info_t3)}" if filtro_info_t3 else ""
@@ -1323,6 +1327,7 @@ with tab3:
 # ===== ABA 4: ESTOQUE & SC/OP =====
 with tab4:
     abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    _t4r = st.session_state.get('tab4_reset', 0)
 
     com_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'SIM'])
     sem_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'NAO'])
@@ -1371,7 +1376,7 @@ with tab4:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=380
             )
-            evento_est = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="pie_estoque_t4")
+            evento_est = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"pie_estoque_t4_{_t4r}")
             if evento_est and evento_est.selection and evento_est.selection.points:
                 filtro_est_sel = [p['label'] for p in evento_est.selection.points if 'label' in p]
 
@@ -1397,7 +1402,7 @@ with tab4:
                 font_color='#E0E0E0', height=380, showlegend=False,
                 xaxis_title='', yaxis_title='Quantidade'
             )
-            evento_acao = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_acao_t4")
+            evento_acao = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_acao_t4_{_t4r}")
             if evento_acao and evento_acao.selection and evento_acao.selection.points:
                 filtro_acao_sel = [p['x'] for p in evento_acao.selection.points if 'x' in p]
 
@@ -1425,6 +1430,7 @@ with tab4:
     if filtro_info_t4 or kpi_filtro_t4:
         if st.button("🧹 Limpar filtros", key="limpar_t4"):
             st.session_state.pop('tab4_filtro', None)
+            st.session_state['tab4_reset'] = _t4r + 1
             st.rerun()
 
     info_t4 = f" — Filtrado por: {' | '.join(filtro_info_t4)}" if filtro_info_t4 else ""
@@ -1475,6 +1481,7 @@ with tab4:
 # ===== ABA 5: FATURAMENTO =====
 if tab5 is not None:
     with tab5:
+        _t5r = st.session_state.get('tab5_reset', 0)
         fat = fat_df.copy()
         fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
         fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto'), errors='coerce')
@@ -1511,7 +1518,7 @@ if tab5 is not None:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
             )
-            evento_mes_fat = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="bar_mes_fat")
+            evento_mes_fat = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"bar_mes_fat_{_t5r}")
             if evento_mes_fat and evento_mes_fat.selection and evento_mes_fat.selection.points:
                 filtro_mes_fat = [p['x'] for p in evento_mes_fat.selection.points if 'x' in p]
 
@@ -1527,7 +1534,7 @@ if tab5 is not None:
                     plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                     font_color='#E0E0E0', yaxis_title='', xaxis_title='R$', height=400
                 )
-                evento_vend = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="bar_vend_fat")
+                evento_vend = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_vend_fat_{_t5r}")
                 if evento_vend and evento_vend.selection and evento_vend.selection.points:
                     filtro_vend_fat = [p['y'] for p in evento_vend.selection.points if 'y' in p]
 
@@ -1557,6 +1564,7 @@ if tab5 is not None:
             r4.markdown(kpi_card(f"{fat_nfs_f}", "NFs (filtrado)"), unsafe_allow_html=True)
 
             if st.button("🧹 Limpar filtros", key="limpar_t5"):
+                st.session_state['tab5_reset'] = _t5r + 1
                 st.rerun()
 
         info_fat = f" — Filtrado por: {' | '.join(filtro_info_fat)}" if filtro_info_fat else ""
