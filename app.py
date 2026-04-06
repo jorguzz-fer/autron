@@ -519,7 +519,8 @@ def gerar_excel_consolidado(df, fat=None):
         'Numero SC', 'Numero OP', 'TP Venda (PV)', 'Tipo Negocio (PV)',
         'Nome do Vendedor', 'Familia', 'Fabricante',
         'Unidade Negocio', 'Estado', 'Regional (PV)',
-        'Nome do Segmento 1', 'Nome do Segmento 2', 'Nome do Segmento 3'
+        'Nome do Segmento 1', 'Nome do Segmento 2', 'Nome do Segmento 3',
+        'Descr. Cond Pagto'
     ]
     header_map = {
         'Num. Pedido': 'PV', 'Item': 'Item', 'Cliente': 'Cod Cliente',
@@ -546,7 +547,8 @@ def gerar_excel_consolidado(df, fat=None):
         'Nome do Vendedor': 'Vendedor', 'Familia': 'Familia', 'Fabricante': 'Fabricante',
         'Unidade Negocio': 'Unidade Negocio', 'Estado': 'Estado',
         'Regional (PV)': 'Regional', 'Nome do Segmento 1': 'Segmento 1',
-        'Nome do Segmento 2': 'Segmento 2', 'Nome do Segmento 3': 'Segmento 3'
+        'Nome do Segmento 2': 'Segmento 2', 'Nome do Segmento 3': 'Segmento 3',
+        'Descr. Cond Pagto': 'Cond. Pagamento'
     }
 
     cols = [c for c in output_cols if c in df.columns]
@@ -985,10 +987,11 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ABAS PRINCIPAIS
 # ========================================================================
 if fat_df is not None and len(fat_df) > 0:
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao de Faturamento"])
 else:
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP"])
     tab5 = None
+    tab6 = None
 
 
 # ===== ABA 1: VISAO GERAL =====
@@ -1297,6 +1300,7 @@ with tab3:
 
     if len(tabela_t3) > 0:
         ent_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Quantidade',
+                   'Vlr.Total', 'Descr. Cond Pagto',
                    'Ped Cliente', 'DT. Fat. Cli', 'DT. Ofertada', 'Prazo_Real_Entrega',
                    'Semana_Entrega', 'FU_Dt_Chegada_Autron', 'Dias_Atraso_Cliente', 'Pronto_para_Fazer']
         ent_cols = [c for c in ent_cols if c in tabela_t3.columns]
@@ -1304,7 +1308,8 @@ with tab3:
         ent_df = tabela_t3[ent_cols].copy().sort_values('Dias_Atraso_Cliente', ascending=False)
         rename_map = {
             'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-            'Quantidade': 'Qtd', 'Ped Cliente': 'Ped.Cliente',
+            'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total', 'Descr. Cond Pagto': 'Cond. Pagamento',
+            'Ped Cliente': 'Ped.Cliente',
             'DT. Fat. Cli': 'Dt.Solicitada', 'DT. Ofertada': 'Dt.Ofertada',
             'Prazo_Real_Entrega': 'Prazo Real', 'Semana_Entrega': 'Semana',
             'FU_Dt_Chegada_Autron': 'Chegada Autron',
@@ -1579,3 +1584,160 @@ if tab5 is not None:
         fat_table = tabela_fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
         fat_table = fat_table.rename(columns={'Margem Liquida (%) por NF Faturada': 'Margem Liquida (%)'})
         st.dataframe(fat_table, use_container_width=True, height=500)
+
+
+# ===== ABA 6: PREVISAO DE FATURAMENTO =====
+if tab6 is not None:
+    with tab6:
+        st.markdown("### 📈 Previsao de Faturamento")
+        st.caption("Previsao baseada na data de Entrega dos pedidos em aberto. Valores liquidos (Valor Total - 17%).")
+
+        # --- Preparar dados de previsao ---
+        abertos_prev = filtered[filtered['Status_Pedido'] == 'EM ABERTO'].copy()
+        abertos_prev['Entrega'] = pd.to_datetime(abertos_prev['Entrega'], errors='coerce')
+        abertos_prev = abertos_prev[abertos_prev['Entrega'].notna() & abertos_prev['Vlr.Total'].notna()]
+        abertos_prev['Vlr_Liquido_Prev'] = abertos_prev['Vlr.Total'] * 0.83  # -17%
+        abertos_prev['Mes_Entrega'] = abertos_prev['Entrega'].dt.to_period('M').astype(str)
+
+        # Previsao mes a mes
+        prev_mes = abertos_prev.groupby('Mes_Entrega').agg(
+            Valor_Previsto=('Vlr_Liquido_Prev', 'sum'),
+            Qtd_Pedidos=('Num. Pedido', 'nunique'),
+            Qtd_Itens=('Vlr_Liquido_Prev', 'count')
+        ).reset_index().sort_values('Mes_Entrega')
+
+        # --- Preparar faturamento real por mes ---
+        fat_prev = fat_df.copy()
+        fat_prev['Emissao'] = pd.to_datetime(fat_prev['Emissao'], errors='coerce')
+        fat_prev['Faturamento Liquido'] = pd.to_numeric(fat_prev.get('Faturamento Liquido'), errors='coerce')
+        fat_prev['Mes_Fat'] = fat_prev['Emissao'].dt.to_period('M').astype(str)
+        fat_real_mes = fat_prev.groupby('Mes_Fat').agg(
+            Faturado_Real=('Faturamento Liquido', 'sum')
+        ).reset_index().rename(columns={'Mes_Fat': 'Mes'})
+
+        # Mes atual para definir corte passado/futuro
+        mes_atual = pd.Timestamp.now().to_period('M').strftime('%Y-%m')
+
+        # KPIs de previsao
+        prev_total = prev_mes['Valor_Previsto'].sum()
+        prev_futuro = prev_mes[prev_mes['Mes_Entrega'] >= mes_atual]['Valor_Previsto'].sum()
+        prev_pvs = abertos_prev['Num. Pedido'].nunique()
+
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(kpi_card(f"R$ {prev_total:,.0f}", "Previsao Total (Liq.)"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {prev_futuro:,.0f}", "Previsao Meses Abertos", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{prev_pvs}", "PVs com Entrega"), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        # --- SECAO 1: Previsao de Entrega mes a mes ---
+        st.markdown("#### 📅 Previsao de Faturamento por Mes (base: Data Entrega)")
+
+        if len(prev_mes) > 0:
+            fig_prev = px.bar(prev_mes, x='Mes_Entrega', y='Valor_Previsto',
+                             title='Previsao de Faturamento Liquido por Mes de Entrega',
+                             color_discrete_sequence=[CORES['azul_claro']],
+                             text=prev_mes['Valor_Previsto'].apply(lambda x: f'R$ {x:,.0f}'))
+            fig_prev.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$ (Liquido)',
+                height=420
+            )
+            fig_prev.update_traces(textposition='outside')
+            st.plotly_chart(fig_prev, use_container_width=True)
+
+            # Tabela detalhada da previsao
+            prev_display = prev_mes.copy()
+            prev_display.columns = ['Mes Entrega', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
+            prev_display['Valor Previsto (Liq.)'] = prev_display['Valor Previsto (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
+            st.dataframe(prev_display, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhum pedido em aberto com data de entrega definida.")
+
+        st.markdown("---")
+
+        # --- SECAO 2: Faturado + Previsao consolidado ---
+        st.markdown("#### 💰 Faturamento Real + Previsao Consolidada")
+        st.caption("Meses passados: apenas faturamento real. Mes atual e futuros: faturamento real + previsao de entrega.")
+
+        # Montar tabela consolidada
+        prev_rename = prev_mes[['Mes_Entrega', 'Valor_Previsto']].rename(columns={'Mes_Entrega': 'Mes'})
+
+        # Unir todos os meses
+        all_meses = sorted(set(fat_real_mes['Mes'].tolist() + prev_rename['Mes'].tolist()))
+        consolidado = pd.DataFrame({'Mes': all_meses})
+        consolidado = consolidado.merge(fat_real_mes, on='Mes', how='left')
+        consolidado = consolidado.merge(prev_rename, on='Mes', how='left')
+        consolidado['Faturado_Real'] = consolidado['Faturado_Real'].fillna(0)
+        consolidado['Valor_Previsto'] = consolidado['Valor_Previsto'].fillna(0)
+
+        # Aplicar regra: meses passados so faturamento real, meses abertos/futuros soma
+        consolidado['Previsao_Aplicada'] = np.where(
+            consolidado['Mes'] >= mes_atual,
+            consolidado['Valor_Previsto'],
+            0
+        )
+        consolidado['Total_Consolidado'] = consolidado['Faturado_Real'] + consolidado['Previsao_Aplicada']
+
+        if len(consolidado) > 0:
+            # Grafico de barras empilhadas
+            fig_consol = go.Figure()
+            fig_consol.add_trace(go.Bar(
+                x=consolidado['Mes'], y=consolidado['Faturado_Real'],
+                name='Faturamento Real', marker_color=CORES['verde'],
+                text=consolidado['Faturado_Real'].apply(lambda x: f'R$ {x:,.0f}' if x > 0 else ''),
+                textposition='inside'
+            ))
+            fig_consol.add_trace(go.Bar(
+                x=consolidado['Mes'], y=consolidado['Previsao_Aplicada'],
+                name='Previsao Entrega (Liq.)', marker_color=CORES['azul_claro'],
+                text=consolidado['Previsao_Aplicada'].apply(lambda x: f'R$ {x:,.0f}' if x > 0 else ''),
+                textposition='inside'
+            ))
+            fig_consol.update_layout(
+                barmode='stack',
+                title='Faturamento Real + Previsao de Faturamento',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
+                height=450, legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+            st.plotly_chart(fig_consol, use_container_width=True)
+
+            # Tabela consolidada
+            consol_display = consolidado[['Mes', 'Faturado_Real', 'Previsao_Aplicada', 'Total_Consolidado']].copy()
+            consol_display.columns = ['Mes', 'Faturamento Real', 'Previsao Entrega (Liq.)', 'Total Consolidado']
+            for col in ['Faturamento Real', 'Previsao Entrega (Liq.)', 'Total Consolidado']:
+                consol_display[col] = consol_display[col].apply(lambda x: f'R$ {x:,.2f}')
+            st.dataframe(consol_display, use_container_width=True, hide_index=True)
+
+            # KPIs do consolidado
+            total_real = consolidado['Faturado_Real'].sum()
+            total_prev_futuro = consolidado['Previsao_Aplicada'].sum()
+            total_consol = consolidado['Total_Consolidado'].sum()
+
+            st.markdown("")
+            r1, r2, r3 = st.columns(3)
+            r1.markdown(kpi_card(f"R$ {total_real:,.0f}", "Total Faturado Real", "ok"), unsafe_allow_html=True)
+            r2.markdown(kpi_card(f"R$ {total_prev_futuro:,.0f}", "Previsao Meses Abertos/Futuros"), unsafe_allow_html=True)
+            r3.markdown(kpi_card(f"R$ {total_consol:,.0f}", "Total Consolidado", "ok"), unsafe_allow_html=True)
+
+        # Detalhe dos pedidos que compoem a previsao
+        st.markdown("---")
+        st.markdown("#### 📋 Detalhe dos Pedidos na Previsao")
+        if len(abertos_prev) > 0:
+            prev_detail_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
+                               'Produto', 'Descricao do Produto', 'Quantidade',
+                               'Vlr.Total', 'Vlr_Liquido_Prev', 'Entrega', 'Mes_Entrega',
+                               'Nome do Vendedor', 'Descr. Cond Pagto']
+            prev_detail_cols = [c for c in prev_detail_cols if c in abertos_prev.columns]
+            prev_detail = abertos_prev[prev_detail_cols].copy().sort_values('Entrega')
+            prev_detail = prev_detail.rename(columns={
+                'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+                'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
+                'Vlr_Liquido_Prev': 'Valor Liq. Previsto',
+                'Mes_Entrega': 'Mes Entrega', 'Nome do Vendedor': 'Vendedor',
+                'Descr. Cond Pagto': 'Cond. Pagamento'
+            })
+            st.dataframe(prev_detail, use_container_width=True, height=500)
+        else:
+            st.info("Nenhum pedido em aberto com data de entrega definida.")
