@@ -560,7 +560,7 @@ def gerar_excel_consolidado(df, fat=None):
         'Nota Fiscal': 'Nota Fiscal', 'Status_Pedido': 'Status',
         'Estoque_Disponivel': 'Estoque Disponivel', 'Qtd_Alocada': 'Qtd Alocada Estoque',
         'Disponivel_Estoque': 'Disponibilidade Estoque',
-        'Acao_Necessaria': 'Acao Necessaria', 'Pronto_para_Fazer': 'Pronto p/ Fazer?',
+        'Acao_Necessaria': 'Acao Necessaria', 'Pronto_para_Fazer': 'Pronto p/ Faturar?',
         'Dias_Atraso_Ofertada': 'Dias Atraso vs Ofertada',
         'Dias_Atraso_Cliente': 'Dias Atraso vs Cliente',
         'Numero SC': 'No SC', 'Numero OP': 'No OP',
@@ -923,7 +923,7 @@ with st.sidebar:
 
     # Pronto para Fazer
     pronto_opts = sorted(df['Pronto_para_Fazer'].unique())
-    pronto_sel = st.multiselect("Pronto p/ Fazer?", pronto_opts, default=[])
+    pronto_sel = st.multiselect("Pronto p/ Faturar?", pronto_opts, default=[])
 
     st.markdown("---")
 
@@ -1097,7 +1097,7 @@ with tab2:
     # KPIs como botoes clicaveis
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        if st.button(f"✅ {prontos}\nProntos p/ Fazer", key="kpi_prontos", use_container_width=True):
+        if st.button(f"✅ {prontos}\nProntos p/ Faturar", key="kpi_prontos", use_container_width=True):
             st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'SIM')
     with c2:
         if st.button(f"⚠️ {parciais}\nParcialmente Prontos", key="kpi_parciais", use_container_width=True):
@@ -1126,7 +1126,7 @@ with tab2:
                 'PARCIAL - Sem Estoque': '#E67E22'
             }
             fig = px.pie(pronto_count, values='Qtd', names='Status',
-                        title='Distribuicao - Pronto p/ Fazer? (clique para filtrar)',
+                        title='Distribuicao - Pronto p/ Faturar? (clique para filtrar)',
                         color='Status', color_discrete_map=cores_pronto, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -1334,7 +1334,7 @@ with tab3:
             'DT. Fat. Cli': 'Dt.Solicitada', 'DT. Ofertada': 'Dt.Ofertada',
             'Prazo_Real_Entrega': 'Prazo Real', 'Semana_Entrega': 'Semana',
             'FU_Dt_Chegada_Autron': 'Chegada Autron',
-            'Dias_Atraso_Cliente': 'Dias Atraso', 'Pronto_para_Fazer': 'Pronto?'
+            'Dias_Atraso_Cliente': 'Dias Atraso', 'Pronto_para_Fazer': 'Pronto p/ Faturar?'
         }
         ent_df = ent_df.rename(columns=rename_map)
 
@@ -1517,6 +1517,12 @@ if tab5 is not None:
         fat['Margem Liquida (%)'] = pd.to_numeric(fat.get('Margem Liquida (%) por NF Faturada'), errors='coerce')
         fat['Mes_Fat'] = fat['Emissao'].dt.to_period('M').astype(str)
 
+        # Aplicar filtros da sidebar ao faturamento
+        if vend_sel and 'Nome do Vendedor' in fat.columns:
+            fat = fat[fat['Nome do Vendedor'].isin(vend_sel)]
+        if ano_sel:
+            fat = fat[fat['Emissao'].dt.year.isin(ano_sel)]
+
         fat_bruto = fat['Faturamento Bruto'].sum()
         fat_liq = fat['Faturamento Liquido'].sum()
         fat_margem_pct = fat['Margem Liquida (%)'].mean()
@@ -1632,6 +1638,11 @@ if tab6 is not None:
         fat_prev['Emissao'] = pd.to_datetime(fat_prev['Emissao'], errors='coerce')
         fat_prev['Faturamento Liquido'] = pd.to_numeric(fat_prev.get('Faturamento Liquido'), errors='coerce')
         fat_prev['Mes_Fat'] = fat_prev['Emissao'].dt.to_period('M').astype(str)
+        # Aplicar filtros da sidebar ao faturamento
+        if vend_sel and 'Nome do Vendedor' in fat_prev.columns:
+            fat_prev = fat_prev[fat_prev['Nome do Vendedor'].isin(vend_sel)]
+        if ano_sel:
+            fat_prev = fat_prev[fat_prev['Emissao'].dt.year.isin(ano_sel)]
         fat_real_mes = fat_prev.groupby('Mes_Fat').agg(
             Faturado_Real=('Faturamento Liquido', 'sum')
         ).reset_index().rename(columns={'Mes_Fat': 'Mes'})
@@ -1662,7 +1673,7 @@ if tab6 is not None:
             fig_prev.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$ (Liquido)',
-                height=420
+                xaxis_type='category', height=420
             )
             fig_prev.update_traces(textposition='outside')
             st.plotly_chart(fig_prev, use_container_width=True)
@@ -1720,7 +1731,7 @@ if tab6 is not None:
                 title='Faturamento Real + Previsao de Faturamento',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
-                height=450, legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                xaxis_type='category', height=450, legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
             )
             st.plotly_chart(fig_consol, use_container_width=True)
 
