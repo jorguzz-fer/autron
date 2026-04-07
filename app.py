@@ -1696,12 +1696,38 @@ if tab6 is not None:
             if evento_prev and evento_prev.selection and evento_prev.selection.points:
                 filtro_mes_prev = list(set(p['x'] for p in evento_prev.selection.points if 'x' in p))
 
-            # Tabela detalhada da previsao
-            prev_display = prev_mes.copy()
-            prev_display.columns = ['Mes Entrega', 'Valor Total (Bruto)', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
-            prev_display['Valor Total (Bruto)'] = prev_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
-            prev_display['Valor Previsto (Liq.)'] = prev_display['Valor Previsto (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
-            st.dataframe(prev_display, use_container_width=True, hide_index=True)
+            # Se clicou em um mes, mostrar filtro + detalhe dos pedidos logo abaixo do grafico
+            if filtro_mes_prev:
+                if st.button("🧹 Limpar filtros", key="limpar_t6"):
+                    st.session_state['tab6_reset'] = _t6r + 1
+                    st.rerun()
+
+                detalhe_prev = abertos_prev[abertos_prev['Mes_Entrega'].isin(filtro_mes_prev)]
+                info_prev = f"Filtrado por Mes: {', '.join(sorted(filtro_mes_prev))}"
+                st.markdown(f"#### 📋 Pedidos do Mes Selecionado ({len(detalhe_prev)} itens) — {info_prev}")
+
+                if len(detalhe_prev) > 0:
+                    prev_detail_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
+                                       'Produto', 'Descricao do Produto', 'Quantidade',
+                                       'Vlr.Total', 'Vlr_Liquido_Prev', 'Entrega', 'Mes_Entrega',
+                                       'Nome do Vendedor', 'Descr. Cond Pagto']
+                    prev_detail_cols = [c for c in prev_detail_cols if c in detalhe_prev.columns]
+                    prev_detail = detalhe_prev[prev_detail_cols].copy().sort_values('Entrega')
+                    prev_detail = prev_detail.rename(columns={
+                        'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+                        'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
+                        'Vlr_Liquido_Prev': 'Valor Liq. Previsto',
+                        'Mes_Entrega': 'Mes Entrega', 'Nome do Vendedor': 'Vendedor',
+                        'Descr. Cond Pagto': 'Cond. Pagamento'
+                    })
+                    st.dataframe(prev_detail, use_container_width=True, height=500)
+            else:
+                # Sem filtro: mostrar tabela resumo por mes
+                prev_display = prev_mes.copy()
+                prev_display.columns = ['Mes Entrega', 'Valor Total (Bruto)', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
+                prev_display['Valor Total (Bruto)'] = prev_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
+                prev_display['Valor Previsto (Liq.)'] = prev_display['Valor Previsto (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
+                st.dataframe(prev_display, use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum pedido em aberto com data de entrega definida.")
 
@@ -1772,38 +1798,3 @@ if tab6 is not None:
             r2.markdown(kpi_card(f"R$ {total_prev_futuro:,.0f}", "Previsao Meses Abertos/Futuros"), unsafe_allow_html=True)
             r3.markdown(kpi_card(f"R$ {total_consol:,.0f}", "Total Consolidado", "ok"), unsafe_allow_html=True)
 
-        # Detalhe dos pedidos que compoem a previsao
-        st.markdown("---")
-
-        detalhe_prev = abertos_prev.copy()
-        filtro_info_prev = []
-
-        if filtro_mes_prev:
-            detalhe_prev = detalhe_prev[detalhe_prev['Mes_Entrega'].isin(filtro_mes_prev)]
-            filtro_info_prev.append(f"Mes: {', '.join(sorted(filtro_mes_prev))}")
-
-        if filtro_info_prev:
-            if st.button("🧹 Limpar filtros", key="limpar_t6"):
-                st.session_state['tab6_reset'] = _t6r + 1
-                st.rerun()
-
-        info_prev = f" — Filtrado por: {' | '.join(filtro_info_prev)}" if filtro_info_prev else ""
-        st.markdown(f"#### 📋 Detalhe dos Pedidos na Previsao ({len(detalhe_prev)} itens){info_prev}")
-
-        if len(detalhe_prev) > 0:
-            prev_detail_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
-                               'Produto', 'Descricao do Produto', 'Quantidade',
-                               'Vlr.Total', 'Vlr_Liquido_Prev', 'Entrega', 'Mes_Entrega',
-                               'Nome do Vendedor', 'Descr. Cond Pagto']
-            prev_detail_cols = [c for c in prev_detail_cols if c in detalhe_prev.columns]
-            prev_detail = detalhe_prev[prev_detail_cols].copy().sort_values('Entrega')
-            prev_detail = prev_detail.rename(columns={
-                'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-                'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
-                'Vlr_Liquido_Prev': 'Valor Liq. Previsto',
-                'Mes_Entrega': 'Mes Entrega', 'Nome do Vendedor': 'Vendedor',
-                'Descr. Cond Pagto': 'Cond. Pagamento'
-            })
-            st.dataframe(prev_detail, use_container_width=True, height=500)
-        else:
-            st.info("Nenhum pedido em aberto com data de entrega definida.")
