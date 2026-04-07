@@ -288,8 +288,18 @@ def carregar_e_processar():
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
 
-    # MATR260 - header fixo na linha 6
-    mt = pd.read_excel(arq_estoque, header=6)
+    # MATR260 - detectar header automaticamente
+    mt_raw = pd.read_excel(arq_estoque, header=None, nrows=20)
+    mt_header_row = None
+    for i in range(len(mt_raw)):
+        row_vals = mt_raw.iloc[i].astype(str).str.strip().str.upper().tolist()
+        if any('SALDO EM ESTOQUE' in v for v in row_vals):
+            mt_header_row = i
+            break
+    if mt_header_row is None:
+        # Fallback: tentar header=6 como antes
+        mt_header_row = 6
+    mt = pd.read_excel(arq_estoque, header=mt_header_row)
 
     sc_csv = pd.read_csv(arq_scio, encoding='latin-1', sep=';', header=2, low_memory=False)
 
