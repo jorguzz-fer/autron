@@ -1628,6 +1628,7 @@ if tab6 is not None:
 
         # Previsao mes a mes
         prev_mes = abertos_prev.groupby('Mes_Entrega').agg(
+            Valor_Total=('Vlr.Total', 'sum'),
             Valor_Previsto=('Vlr_Liquido_Prev', 'sum'),
             Qtd_Pedidos=('Num. Pedido', 'nunique'),
             Qtd_Itens=('Vlr_Liquido_Prev', 'count')
@@ -1651,14 +1652,16 @@ if tab6 is not None:
         mes_atual = pd.Timestamp.now().to_period('M').strftime('%Y-%m')
 
         # KPIs de previsao
-        prev_total = prev_mes['Valor_Previsto'].sum()
-        prev_futuro = prev_mes[prev_mes['Mes_Entrega'] >= mes_atual]['Valor_Previsto'].sum()
+        prev_bruto_total = prev_mes['Valor_Total'].sum()
+        prev_liq_total = prev_mes['Valor_Previsto'].sum()
+        prev_liq_futuro = prev_mes[prev_mes['Mes_Entrega'] >= mes_atual]['Valor_Previsto'].sum()
         prev_pvs = abertos_prev['Num. Pedido'].nunique()
 
-        c1, c2, c3 = st.columns(3)
-        c1.markdown(kpi_card(f"R$ {prev_total:,.0f}", "Previsao Total (Liq.)"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {prev_futuro:,.0f}", "Previsao Meses Abertos", "ok"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"{prev_pvs}", "PVs com Entrega"), unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(kpi_card(f"R$ {prev_bruto_total:,.0f}", "Previsao Total (Bruto)"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {prev_liq_total:,.0f}", "Previsao Total (Liq.)"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {prev_liq_futuro:,.0f}", "Previsao Meses Abertos (Liq.)", "ok"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{prev_pvs}", "PVs com Entrega"), unsafe_allow_html=True)
 
         st.markdown("")
 
@@ -1666,21 +1669,33 @@ if tab6 is not None:
         st.markdown("#### 📅 Previsao de Faturamento por Mes (base: Data Entrega)")
 
         if len(prev_mes) > 0:
-            fig_prev = px.bar(prev_mes, x='Mes_Entrega', y='Valor_Previsto',
-                             title='Previsao de Faturamento Liquido por Mes de Entrega',
-                             color_discrete_sequence=[CORES['azul_claro']],
-                             text=prev_mes['Valor_Previsto'].apply(lambda x: f'R$ {x:,.0f}'))
+            fig_prev = go.Figure()
+            fig_prev.add_trace(go.Bar(
+                x=prev_mes['Mes_Entrega'], y=prev_mes['Valor_Total'],
+                name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
+                text=prev_mes['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
+                textposition='outside'
+            ))
+            fig_prev.add_trace(go.Bar(
+                x=prev_mes['Mes_Entrega'], y=prev_mes['Valor_Previsto'],
+                name='Valor Liquido (-17%)', marker_color=CORES['verde'],
+                text=prev_mes['Valor_Previsto'].apply(lambda x: f'R$ {x:,.0f}'),
+                textposition='outside'
+            ))
             fig_prev.update_layout(
+                barmode='group',
+                title='Previsao de Faturamento por Mes de Entrega (Total x Liquido)',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$ (Liquido)',
-                xaxis_type='category', height=420
+                font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$',
+                xaxis_type='category', height=450,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
             )
-            fig_prev.update_traces(textposition='outside')
             st.plotly_chart(fig_prev, use_container_width=True)
 
             # Tabela detalhada da previsao
             prev_display = prev_mes.copy()
-            prev_display.columns = ['Mes Entrega', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
+            prev_display.columns = ['Mes Entrega', 'Valor Total (Bruto)', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
+            prev_display['Valor Total (Bruto)'] = prev_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
             prev_display['Valor Previsto (Liq.)'] = prev_display['Valor Previsto (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
             st.dataframe(prev_display, use_container_width=True, hide_index=True)
         else:
