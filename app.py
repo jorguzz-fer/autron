@@ -288,18 +288,29 @@ def carregar_e_processar():
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
 
-    # MATR260 - detectar header automaticamente
+    # MATR260 - detectar header e colunas automaticamente
     mt_raw = pd.read_excel(arq_estoque, header=None, nrows=20)
     mt_header_row = None
     for i in range(len(mt_raw)):
-        row_vals = mt_raw.iloc[i].astype(str).str.strip().str.upper().tolist()
-        if any('SALDO EM ESTOQUE' in v for v in row_vals):
+        row_upper = [str(v).strip().upper() for v in mt_raw.iloc[i].tolist()]
+        if any('SALDO EM ESTOQUE' == v for v in row_upper) or any('SALDO ATUAL' == v for v in row_upper):
             mt_header_row = i
             break
     if mt_header_row is None:
-        # Fallback: tentar header=6 como antes
-        mt_header_row = 6
+        mt_header_row = 1  # Novo formato padrao
     mt = pd.read_excel(arq_estoque, header=mt_header_row)
+    # Normalizar nomes de colunas para formato esperado
+    col_map_estoque = {}
+    for c in mt.columns:
+        cu = str(c).strip().upper()
+        if cu == 'SALDO ATUAL':
+            col_map_estoque[c] = 'SALDO EM ESTOQUE'
+        elif cu == 'CODIGO':
+            col_map_estoque[c] = 'CODIGO'
+    mt = mt.rename(columns=col_map_estoque)
+    if 'CODIGO' not in mt.columns:
+        # Tentar primeira coluna como codigo
+        mt = mt.rename(columns={mt.columns[0]: 'CODIGO'})
 
     sc_csv = pd.read_csv(arq_scio, encoding='latin-1', sep=';', header=2, low_memory=False)
 
