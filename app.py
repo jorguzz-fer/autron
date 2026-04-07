@@ -1667,6 +1667,8 @@ if tab6 is not None:
 
         # --- SECAO 1: Previsao de Entrega mes a mes ---
         st.markdown("#### 📅 Previsao de Faturamento por Mes (base: Data Entrega)")
+        _t6r = st.session_state.get('tab6_reset', 0)
+        filtro_mes_prev = []
 
         if len(prev_mes) > 0:
             fig_prev = go.Figure()
@@ -1684,13 +1686,15 @@ if tab6 is not None:
             ))
             fig_prev.update_layout(
                 barmode='group',
-                title='Previsao de Faturamento por Mes de Entrega (Total x Liquido)',
+                title='Previsao de Faturamento por Mes de Entrega (Total x Liquido) - clique para filtrar',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$',
                 xaxis_type='category', height=450,
                 legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
             )
-            st.plotly_chart(fig_prev, use_container_width=True)
+            evento_prev = st.plotly_chart(fig_prev, use_container_width=True, on_select="rerun", key=f"bar_prev_mes_{_t6r}")
+            if evento_prev and evento_prev.selection and evento_prev.selection.points:
+                filtro_mes_prev = list(set(p['x'] for p in evento_prev.selection.points if 'x' in p))
 
             # Tabela detalhada da previsao
             prev_display = prev_mes.copy()
@@ -1770,14 +1774,29 @@ if tab6 is not None:
 
         # Detalhe dos pedidos que compoem a previsao
         st.markdown("---")
-        st.markdown("#### 📋 Detalhe dos Pedidos na Previsao")
-        if len(abertos_prev) > 0:
+
+        detalhe_prev = abertos_prev.copy()
+        filtro_info_prev = []
+
+        if filtro_mes_prev:
+            detalhe_prev = detalhe_prev[detalhe_prev['Mes_Entrega'].isin(filtro_mes_prev)]
+            filtro_info_prev.append(f"Mes: {', '.join(sorted(filtro_mes_prev))}")
+
+        if filtro_info_prev:
+            if st.button("🧹 Limpar filtros", key="limpar_t6"):
+                st.session_state['tab6_reset'] = _t6r + 1
+                st.rerun()
+
+        info_prev = f" — Filtrado por: {' | '.join(filtro_info_prev)}" if filtro_info_prev else ""
+        st.markdown(f"#### 📋 Detalhe dos Pedidos na Previsao ({len(detalhe_prev)} itens){info_prev}")
+
+        if len(detalhe_prev) > 0:
             prev_detail_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
                                'Produto', 'Descricao do Produto', 'Quantidade',
                                'Vlr.Total', 'Vlr_Liquido_Prev', 'Entrega', 'Mes_Entrega',
                                'Nome do Vendedor', 'Descr. Cond Pagto']
-            prev_detail_cols = [c for c in prev_detail_cols if c in abertos_prev.columns]
-            prev_detail = abertos_prev[prev_detail_cols].copy().sort_values('Entrega')
+            prev_detail_cols = [c for c in prev_detail_cols if c in detalhe_prev.columns]
+            prev_detail = detalhe_prev[prev_detail_cols].copy().sort_values('Entrega')
             prev_detail = prev_detail.rename(columns={
                 'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
                 'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
