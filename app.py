@@ -1962,33 +1962,78 @@ if tab7 is not None:
                 sem_display['Valor Liquido (Liq.)'] = sem_display['Valor Liquido (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
                 st.dataframe(sem_display, use_container_width=True, hide_index=True)
 
-            # --- Visao dia a dia (proximos 30 dias) ---
+            # --- Visao dia a dia com filtro de datas ---
             st.markdown("---")
-            st.markdown("#### 📅 Visao Dia a Dia (Proximos 30 dias)")
+            st.markdown("#### 📅 Visao Dia a Dia")
 
-            prox_30 = agenda[(agenda['Data_Prevista'] >= today) & (agenda['Data_Prevista'] <= today + pd.Timedelta(days=30))]
-            if len(prox_30) > 0:
-                prox_30_dia = prox_30.groupby('Dia').agg(
+            col_dt1, col_dt2, col_dt3 = st.columns([1, 1, 2])
+            with col_dt1:
+                data_inicio = st.date_input("Data Inicio", value=today.date(), key="agenda_dt_ini")
+            with col_dt2:
+                data_fim = st.date_input("Data Fim", value=(today + pd.Timedelta(days=30)).date(), key="agenda_dt_fim")
+
+            dt_ini = pd.Timestamp(data_inicio)
+            dt_fim = pd.Timestamp(data_fim)
+            agenda_periodo = agenda[(agenda['Data_Prevista'] >= dt_ini) & (agenda['Data_Prevista'] <= dt_fim)]
+
+            if len(agenda_periodo) > 0:
+                valor_periodo = agenda_periodo['Vlr.Total'].sum()
+                valor_liq_periodo = agenda_periodo['Vlr_Liquido'].sum()
+                qtd_periodo = len(agenda_periodo)
+                with col_dt3:
+                    st.markdown(f"**{qtd_periodo} itens** | Bruto: **R$ {valor_periodo:,.0f}** | Liquido: **R$ {valor_liq_periodo:,.0f}**")
+
+                periodo_dia = agenda_periodo.groupby('Dia').agg(
                     Valor_Total=('Vlr.Total', 'sum'),
                     Valor_Liquido=('Vlr_Liquido', 'sum'),
                     Qtd=('Vlr.Total', 'count')
                 ).reset_index().sort_values('Dia')
-                prox_30_dia['Dia_Label'] = prox_30_dia['Dia'].apply(lambda d: d.strftime('%d/%m (%a)'))
+                periodo_dia['Dia_Label'] = periodo_dia['Dia'].apply(lambda d: d.strftime('%d/%m (%a)'))
 
-                fig_30 = px.bar(prox_30_dia, x='Dia_Label', y='Valor_Liquido',
-                               title='Faturamento Previsto Liquido - Proximos 30 Dias',
-                               color_discrete_sequence=[CORES['verde']],
-                               text=prox_30_dia['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'))
-                fig_30.update_layout(
+                fig_periodo = go.Figure()
+                fig_periodo.add_trace(go.Bar(
+                    x=periodo_dia['Dia_Label'], y=periodo_dia['Valor_Total'],
+                    name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
+                    text=periodo_dia['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
+                    textposition='outside'
+                ))
+                fig_periodo.add_trace(go.Bar(
+                    x=periodo_dia['Dia_Label'], y=periodo_dia['Valor_Liquido'],
+                    name='Valor Liquido (-17%)', marker_color=CORES['verde'],
+                    text=periodo_dia['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
+                    textposition='outside'
+                ))
+                fig_periodo.update_layout(
+                    barmode='group',
+                    title=f"Faturamento Previsto Dia a Dia ({data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')})",
                     plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                     font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
-                    xaxis_type='category', height=400
+                    xaxis_type='category', height=420,
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
                 )
-                fig_30.update_traces(textposition='outside')
-                fig_30.update_xaxes(tickangle=-45)
-                st.plotly_chart(fig_30, use_container_width=True)
+                fig_periodo.update_xaxes(tickangle=-45)
+                st.plotly_chart(fig_periodo, use_container_width=True)
+
+                # Tabela de pedidos do periodo
+                st.markdown(f"##### 📋 Pedidos do Periodo ({len(agenda_periodo)} itens)")
+                det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
+                           'Produto', 'Descricao do Produto', 'Quantidade',
+                           'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
+                           'Entrega', 'FU_Dt_Confirma',
+                           'Nome do Vendedor', 'Descr. Cond Pagto']
+                det_cols = [c for c in det_cols if c in agenda_periodo.columns]
+                det_periodo = agenda_periodo[det_cols].copy().sort_values('Data_Prevista')
+                det_periodo = det_periodo.rename(columns={
+                    'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+                    'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
+                    'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
+                    'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
+                    'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
+                    'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
+                })
+                st.dataframe(det_periodo, use_container_width=True, height=500)
             else:
-                st.info("Nenhum pedido previsto para os proximos 30 dias.")
+                st.info(f"Nenhum pedido previsto no periodo de {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}.")
         else:
             st.info("Nenhum pedido em aberto com data prevista de entrega.")
 
