@@ -1858,6 +1858,50 @@ if tab7 is not None:
 
             st.markdown("")
 
+            # Colunas padrao para exibir pedidos
+            _agenda_det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
+                               'Produto', 'Descricao do Produto', 'Quantidade',
+                               'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
+                               'Entrega', 'FU_Dt_Confirma',
+                               'Nome do Vendedor', 'Descr. Cond Pagto']
+            _agenda_rename = {
+                'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+                'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
+                'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
+                'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
+                'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
+                'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
+            }
+
+            # --- Pedidos do Dia ---
+            pedidos_hoje = agenda[agenda['Data_Prevista'].dt.normalize() == today]
+            valor_hoje = pedidos_hoje['Vlr.Total'].sum()
+            valor_liq_hoje = pedidos_hoje['Vlr_Liquido'].sum()
+
+            st.markdown(f"#### 📌 Pedidos do Dia ({today.strftime('%d/%m/%Y')}) — {len(pedidos_hoje)} itens | Bruto: R$ {valor_hoje:,.0f} | Liq: R$ {valor_liq_hoje:,.0f}")
+            if len(pedidos_hoje) > 0:
+                cols_hoje = [c for c in _agenda_det_cols if c in pedidos_hoje.columns]
+                df_hoje = pedidos_hoje[cols_hoje].copy().sort_values('Data_Prevista')
+                df_hoje = df_hoje.rename(columns=_agenda_rename)
+                st.dataframe(df_hoje, use_container_width=True, height=min(300, 35 + len(df_hoje) * 35), hide_index=True)
+            else:
+                st.info("Nenhum pedido previsto para hoje.")
+
+            st.markdown("")
+
+            # --- Pedidos da Semana ---
+            valor_liq_sem = semana_atual['Vlr_Liquido'].sum()
+            st.markdown(f"#### 📋 Pedidos da Semana ({inicio_semana.strftime('%d/%m')} a {fim_semana.strftime('%d/%m')}) — {len(semana_atual)} itens | Bruto: R$ {valor_semana:,.0f} | Liq: R$ {valor_liq_sem:,.0f}")
+            if len(semana_atual) > 0:
+                cols_sem = [c for c in _agenda_det_cols if c in semana_atual.columns]
+                df_sem = semana_atual[cols_sem].copy().sort_values('Data_Prevista')
+                df_sem = df_sem.rename(columns=_agenda_rename)
+                st.dataframe(df_sem, use_container_width=True, height=min(500, 35 + len(df_sem) * 35), hide_index=True)
+            else:
+                st.info("Nenhum pedido previsto para esta semana.")
+
+            st.markdown("---")
+
             # --- Visao por semana ---
             st.markdown("#### 📊 Faturamento Previsto por Semana")
             _t7r = st.session_state.get('tab7_reset', 0)
