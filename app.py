@@ -1008,9 +1008,9 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ABAS PRINCIPAIS
 # ========================================================================
 if fat_df is not None and len(fat_df) > 0:
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao de Faturamento"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao de Faturamento", "📆 Agenda de Entregas"])
 else:
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP"])
+    tab1, tab2, tab3, tab4, tab7 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "📆 Agenda de Entregas"])
     tab5 = None
     tab6 = None
 
@@ -1797,4 +1797,198 @@ if tab6 is not None:
             r1.markdown(kpi_card(f"R$ {total_real:,.0f}", "Total Faturado Real", "ok"), unsafe_allow_html=True)
             r2.markdown(kpi_card(f"R$ {total_prev_futuro:,.0f}", "Previsao Meses Abertos/Futuros"), unsafe_allow_html=True)
             r3.markdown(kpi_card(f"R$ {total_consol:,.0f}", "Total Consolidado", "ok"), unsafe_allow_html=True)
+
+
+# ===== ABA 7: AGENDA DE ENTREGAS =====
+if tab7 is not None:
+    with tab7:
+        st.markdown("### 📆 Agenda de Entregas")
+        st.caption("Visao dia a dia e semanal dos pedidos em aberto. Prioriza Data Confirmada (Follow-up), senao usa Data de Entrega (Pedido).")
+
+        agenda = filtered[filtered['Status_Pedido'] == 'EM ABERTO'].copy()
+        agenda['Entrega'] = pd.to_datetime(agenda['Entrega'], errors='coerce')
+        agenda['FU_Dt_Confirma'] = pd.to_datetime(agenda['FU_Dt_Confirma'], errors='coerce')
+
+        # Data prevista: prioriza confirmada do follow-up, senao usa entrega do pedido
+        agenda['Data_Prevista'] = agenda['FU_Dt_Confirma'].combine_first(agenda['Entrega'])
+        agenda['Origem_Data'] = np.where(
+            agenda['FU_Dt_Confirma'].notna(), 'Confirmada (Follow-up)',
+            np.where(agenda['Entrega'].notna(), 'Entrega (Pedido)', 'Sem data')
+        )
+        agenda = agenda[agenda['Data_Prevista'].notna()]
+        agenda['Vlr.Total'] = pd.to_numeric(agenda['Vlr.Total'], errors='coerce').fillna(0)
+        agenda['Vlr_Liquido'] = agenda['Vlr.Total'] * 0.83
+
+        if len(agenda) > 0:
+            today = pd.Timestamp.now().normalize()
+
+            # Campos auxiliares
+            agenda['Dia'] = agenda['Data_Prevista'].dt.date
+            agenda['Semana'] = agenda['Data_Prevista'].dt.isocalendar().week.astype(int)
+            agenda['Ano_Sem'] = agenda['Data_Prevista'].dt.strftime('%Y-S%W')
+            agenda['Semana_Label'] = agenda['Data_Prevista'].apply(
+                lambda d: f"{(d - pd.Timedelta(days=d.weekday())).strftime('%d/%m')} a {(d + pd.Timedelta(days=6 - d.weekday())).strftime('%d/%m')}"
+            )
+            agenda['Semana_Key'] = agenda['Data_Prevista'].apply(
+                lambda d: (d - pd.Timedelta(days=d.weekday())).strftime('%Y-%m-%d')
+            )
+            agenda['Semana_Display'] = agenda.apply(
+                lambda r: f"{r['Semana_Key']}|{r['Semana_Label']}", axis=1
+            )
+
+            # Pedidos da semana atual
+            inicio_semana = today - pd.Timedelta(days=today.weekday())
+            fim_semana = inicio_semana + pd.Timedelta(days=6)
+            semana_atual = agenda[(agenda['Data_Prevista'] >= inicio_semana) & (agenda['Data_Prevista'] <= fim_semana)]
+            proxima_semana = agenda[(agenda['Data_Prevista'] > fim_semana) & (agenda['Data_Prevista'] <= fim_semana + pd.Timedelta(days=7))]
+
+            # KPIs
+            total_agenda = len(agenda)
+            valor_semana = semana_atual['Vlr.Total'].sum()
+            valor_liq_semana = semana_atual['Vlr_Liquido'].sum()
+            qtd_semana = len(semana_atual)
+            qtd_prox = len(proxima_semana)
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.markdown(kpi_card(f"{total_agenda}", "Total Pedidos Agenda"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"{qtd_semana}", "Esta Semana", "warn" if qtd_semana > 0 else "ok"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"R$ {valor_semana:,.0f}", "Valor Semana (Bruto)"), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {valor_liq_semana:,.0f}", "Valor Semana (Liq.)", "ok"), unsafe_allow_html=True)
+            c5.markdown(kpi_card(f"{qtd_prox}", "Proxima Semana"), unsafe_allow_html=True)
+
+            st.markdown("")
+
+            # --- Visao por semana ---
+            st.markdown("#### 📊 Faturamento Previsto por Semana")
+            _t7r = st.session_state.get('tab7_reset', 0)
+            filtro_semana_agenda = []
+
+            sem_agg = agenda.groupby(['Semana_Key', 'Semana_Label']).agg(
+                Valor_Total=('Vlr.Total', 'sum'),
+                Valor_Liquido=('Vlr_Liquido', 'sum'),
+                Qtd_Itens=('Vlr.Total', 'count'),
+                Qtd_PVs=('Num. Pedido', 'nunique')
+            ).reset_index().sort_values('Semana_Key')
+            sem_agg['Semana_Exibicao'] = sem_agg['Semana_Label']
+
+            fig_sem = go.Figure()
+            fig_sem.add_trace(go.Bar(
+                x=sem_agg['Semana_Exibicao'], y=sem_agg['Valor_Total'],
+                name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
+                text=sem_agg['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
+                textposition='outside'
+            ))
+            fig_sem.add_trace(go.Bar(
+                x=sem_agg['Semana_Exibicao'], y=sem_agg['Valor_Liquido'],
+                name='Valor Liquido (-17%)', marker_color=CORES['verde'],
+                text=sem_agg['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
+                textposition='outside'
+            ))
+            fig_sem.update_layout(
+                barmode='group',
+                title='Faturamento Previsto por Semana de Entrega - clique para filtrar',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='Semana', yaxis_title='R$',
+                xaxis_type='category', height=450,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+            evento_sem = st.plotly_chart(fig_sem, use_container_width=True, on_select="rerun", key=f"bar_sem_agenda_{_t7r}")
+            if evento_sem and evento_sem.selection and evento_sem.selection.points:
+                filtro_semana_agenda = list(set(p['x'] for p in evento_sem.selection.points if 'x' in p))
+
+            # Se clicou em uma semana, mostrar detalhe dia a dia
+            if filtro_semana_agenda:
+                if st.button("🧹 Limpar filtros", key="limpar_t7"):
+                    st.session_state['tab7_reset'] = _t7r + 1
+                    st.rerun()
+
+                semana_labels_sel = filtro_semana_agenda
+                agenda_filtrada = agenda[agenda['Semana_Label'].isin(semana_labels_sel)]
+                st.markdown(f"#### 📋 Pedidos da Semana Selecionada ({len(agenda_filtrada)} itens)")
+
+                # Grafico dia a dia da semana
+                if len(agenda_filtrada) > 0:
+                    agenda_filtrada['Dia_Str'] = agenda_filtrada['Data_Prevista'].dt.strftime('%d/%m (%a)')
+                    dia_agg = agenda_filtrada.groupby('Dia_Str').agg(
+                        Valor_Total=('Vlr.Total', 'sum'),
+                        Valor_Liquido=('Vlr_Liquido', 'sum'),
+                        Qtd=('Vlr.Total', 'count')
+                    ).reset_index()
+
+                    fig_dia = go.Figure()
+                    fig_dia.add_trace(go.Bar(
+                        x=dia_agg['Dia_Str'], y=dia_agg['Valor_Total'],
+                        name='Valor Total', marker_color=CORES['azul_claro'],
+                        text=dia_agg['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
+                        textposition='outside'
+                    ))
+                    fig_dia.add_trace(go.Bar(
+                        x=dia_agg['Dia_Str'], y=dia_agg['Valor_Liquido'],
+                        name='Valor Liquido', marker_color=CORES['verde'],
+                        text=dia_agg['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
+                        textposition='outside'
+                    ))
+                    fig_dia.update_layout(
+                        barmode='group', title='Faturamento Previsto Dia a Dia',
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
+                        xaxis_type='category', height=350,
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                    )
+                    st.plotly_chart(fig_dia, use_container_width=True)
+
+                    # Tabela de pedidos
+                    det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
+                               'Produto', 'Descricao do Produto', 'Quantidade',
+                               'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
+                               'Entrega', 'FU_Dt_Confirma',
+                               'Nome do Vendedor', 'Descr. Cond Pagto']
+                    det_cols = [c for c in det_cols if c in agenda_filtrada.columns]
+                    det = agenda_filtrada[det_cols].copy().sort_values('Data_Prevista')
+                    det = det.rename(columns={
+                        'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+                        'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
+                        'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
+                        'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
+                        'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
+                        'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
+                    })
+                    st.dataframe(det, use_container_width=True, height=500)
+            else:
+                # Sem filtro: mostrar tabela resumo por semana
+                sem_display = sem_agg[['Semana_Exibicao', 'Valor_Total', 'Valor_Liquido', 'Qtd_PVs', 'Qtd_Itens']].copy()
+                sem_display.columns = ['Semana', 'Valor Total (Bruto)', 'Valor Liquido (Liq.)', 'Qtd PVs', 'Qtd Itens']
+                sem_display['Valor Total (Bruto)'] = sem_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
+                sem_display['Valor Liquido (Liq.)'] = sem_display['Valor Liquido (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
+                st.dataframe(sem_display, use_container_width=True, hide_index=True)
+
+            # --- Visao dia a dia (proximos 30 dias) ---
+            st.markdown("---")
+            st.markdown("#### 📅 Visao Dia a Dia (Proximos 30 dias)")
+
+            prox_30 = agenda[(agenda['Data_Prevista'] >= today) & (agenda['Data_Prevista'] <= today + pd.Timedelta(days=30))]
+            if len(prox_30) > 0:
+                prox_30_dia = prox_30.groupby('Dia').agg(
+                    Valor_Total=('Vlr.Total', 'sum'),
+                    Valor_Liquido=('Vlr_Liquido', 'sum'),
+                    Qtd=('Vlr.Total', 'count')
+                ).reset_index().sort_values('Dia')
+                prox_30_dia['Dia_Label'] = prox_30_dia['Dia'].apply(lambda d: d.strftime('%d/%m (%a)'))
+
+                fig_30 = px.bar(prox_30_dia, x='Dia_Label', y='Valor_Liquido',
+                               title='Faturamento Previsto Liquido - Proximos 30 Dias',
+                               color_discrete_sequence=[CORES['verde']],
+                               text=prox_30_dia['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'))
+                fig_30.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
+                    xaxis_type='category', height=400
+                )
+                fig_30.update_traces(textposition='outside')
+                fig_30.update_xaxes(tickangle=-45)
+                st.plotly_chart(fig_30, use_container_width=True)
+            else:
+                st.info("Nenhum pedido previsto para os proximos 30 dias.")
+        else:
+            st.info("Nenhum pedido em aberto com data prevista de entrega.")
 
