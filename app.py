@@ -1376,32 +1376,62 @@ with tab6:
             c4.markdown(kpi_card(f"R$ {ult['Diferenca_Meta']:+,.0f}", "Diferenca",
                         "ok" if ult['Diferenca_Meta'] >= 0 else "alert"), unsafe_allow_html=True)
 
-        # --- Consolidado trimestral ---
+        # --- KPIs do mes atual com Total Liquido Projetado ---
+        atual = quadro[quadro['Mes'] == mes_atual_str]
+        if len(atual) > 0:
+            atual = atual.iloc[0]
+            total_liq_proj = atual['Fat_Liquido'] + atual['Total_Liq_a_Faturar']
+            st.markdown(f"#### Resultado {mes_atual_str}")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.markdown(kpi_card(f"R$ {atual['Receita_Liquida_Meta']:,.0f}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {atual['Fat_Liquido']:,.0f}", "Fat. Líquido Atual"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"R$ {atual['Total_Liq_a_Faturar']:,.0f}", "Líq. a Faturar (-17%)"), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {total_liq_proj:,.0f}", "Total Líquido Projetado", "ok" if total_liq_proj >= atual['Receita_Liquida_Meta'] else "warn"), unsafe_allow_html=True)
+            ating_atual = (total_liq_proj / atual['Receita_Liquida_Meta'] * 100) if atual['Receita_Liquida_Meta'] > 0 else 0
+            c5.markdown(kpi_card(f"{ating_atual:.0f}%", "Atingimento Projetado",
+                        "ok" if ating_atual >= 100 else ("warn" if ating_atual >= 80 else "alert")), unsafe_allow_html=True)
+
+        # --- Consolidado Q1 (fechado) ---
         quadro['Trimestre'] = quadro['Mes'].apply(
             lambda m: f"Q{(int(m.split('-')[1]) - 1) // 3 + 1}"
         )
-        tri_atual = f"Q{(today_period.month - 1) // 3 + 1}"
 
-        # Ultimo trimestre com dados
-        tris_com_dados = quadro[quadro['Fat_Liquido'] > 0]['Trimestre'].unique()
-        tri_mostrar = sorted(tris_com_dados)[-1] if len(tris_com_dados) > 0 else 'Q1'
+        q1_data = quadro[quadro['Trimestre'] == 'Q1']
+        meta_q1 = q1_data['Receita_Liquida_Meta'].sum()
+        fat_liq_q1 = q1_data['Fat_Liquido'].sum()
+        total_liq_q1 = q1_data['Total_Liquido'].sum()
+        diff_q1 = fat_liq_q1 - meta_q1
+        ating_q1 = (fat_liq_q1 / meta_q1 * 100) if meta_q1 > 0 else 0
 
-        tri_data = quadro[quadro['Trimestre'] == tri_mostrar]
-        meta_tri = tri_data['Receita_Liquida_Meta'].sum()
-        fat_liq_tri = tri_data['Fat_Liquido'].sum()
-        total_liq_tri = tri_data['Total_Liquido'].sum()
-        diff_tri = total_liq_tri - meta_tri
-        ating_tri = (total_liq_tri / meta_tri * 100) if meta_tri > 0 else 0
-
-        st.markdown(f"#### Consolidado {tri_mostrar}")
+        st.markdown("#### Consolidado Q1")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card(f"R$ {meta_tri:,.0f}", f"Meta {tri_mostrar}"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {fat_liq_tri:,.0f}", "Fat. Líquido"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {total_liq_tri:,.0f}", f"Projecao {tri_mostrar}"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"R$ {diff_tri:+,.0f}", "Diferenca",
-                    "ok" if diff_tri >= 0 else "alert"), unsafe_allow_html=True)
-        c5.markdown(kpi_card(f"{ating_tri:.0f}%", "Atingimento",
-                    "ok" if ating_tri >= 100 else ("warn" if ating_tri >= 80 else "alert")), unsafe_allow_html=True)
+        c1.markdown(kpi_card(f"R$ {meta_q1:,.0f}", "Meta Q1"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fat_liq_q1:,.0f}", "Fat. Líquido Q1"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {total_liq_q1:,.0f}", "Total Líquido Q1"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {diff_q1:+,.0f}", "Diferenca",
+                    "ok" if diff_q1 >= 0 else "alert"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"{ating_q1:.0f}%", "Atingimento",
+                    "ok" if ating_q1 >= 100 else ("warn" if ating_q1 >= 80 else "alert")), unsafe_allow_html=True)
+
+        # --- Consolidado trimestre atual (se diferente de Q1) ---
+        tri_atual = f"Q{(today_period.month - 1) // 3 + 1}"
+        if tri_atual != 'Q1':
+            tri_data = quadro[quadro['Trimestre'] == tri_atual]
+            meta_tri = tri_data['Receita_Liquida_Meta'].sum()
+            fat_liq_tri = tri_data['Fat_Liquido'].sum()
+            total_liq_tri = tri_data['Total_Liquido'].sum()
+            diff_tri = total_liq_tri - meta_tri
+            ating_tri = (total_liq_tri / meta_tri * 100) if meta_tri > 0 else 0
+
+            st.markdown(f"#### Consolidado {tri_atual}")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.markdown(kpi_card(f"R$ {meta_tri:,.0f}", f"Meta {tri_atual}"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {fat_liq_tri:,.0f}", "Fat. Líquido"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"R$ {total_liq_tri:,.0f}", f"Total Líquido {tri_atual}"), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {diff_tri:+,.0f}", "Diferenca",
+                        "ok" if diff_tri >= 0 else "alert"), unsafe_allow_html=True)
+            c5.markdown(kpi_card(f"{ating_tri:.0f}%", "Atingimento",
+                        "ok" if ating_tri >= 100 else ("warn" if ating_tri >= 80 else "alert")), unsafe_allow_html=True)
 
         st.markdown("")
 
