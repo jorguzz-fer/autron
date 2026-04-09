@@ -1080,8 +1080,8 @@ with tab3:
 
 # ===== ABA 4: PREVISAO ENTREGA =====
 with tab4:
-    filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3')
-    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
+    filtered_t4 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab4_previsao_entrega')
+    abertos = filtered_t4[filtered_t4['Status_Pedido'] == 'EM ABERTO']
 
     atrasados = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
     media_atraso = abertos.loc[abertos['Dias_Atraso_Cliente'] > 0, 'Dias_Atraso_Cliente'].mean()
@@ -1167,8 +1167,8 @@ with tab4:
 
 # ===== ABA 5: ESTOQUE & SC/OP =====
 with tab5:
-    filtered_t4 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab4')
-    abertos = filtered_t4[filtered_t4['Status_Pedido'] == 'EM ABERTO']
+    filtered_t5 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab5_estoque')
+    abertos = filtered_t5[filtered_t5['Status_Pedido'] == 'EM ABERTO']
 
     com_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'SIM'])
     sem_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'NAO'])
