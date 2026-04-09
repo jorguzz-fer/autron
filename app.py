@@ -1438,6 +1438,20 @@ with tab6:
             c5.markdown(kpi_card(f"{ating_tri:.0f}%", "Atingimento",
                         "ok" if ating_tri >= 100 else ("warn" if ating_tri >= 80 else "alert")), unsafe_allow_html=True)
 
+        # --- Total de Carteira (todos pedidos em aberto) ---
+        carteira = df[df['Status_Pedido'] == 'EM ABERTO']
+        carteira_bruto = carteira['Vlr.Total'].sum()
+        carteira_liquido = carteira_bruto * 0.83
+        carteira_pvs = carteira['Num. Pedido'].nunique()
+        carteira_linhas = len(carteira)
+
+        st.markdown("#### Total de Carteira")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(kpi_card(f"R$ {carteira_bruto:,.0f}", "Valor Bruto"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {carteira_liquido:,.0f}", "Valor Líquido (-17%)"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{carteira_pvs}", "PVs em Aberto"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{carteira_linhas}", "Linhas em Aberto"), unsafe_allow_html=True)
+
         st.markdown("")
 
         # --- QUADRO PRINCIPAL (estilo planilha da Daniele) ---
