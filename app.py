@@ -1348,7 +1348,7 @@ with tab5:
             # Faturado vs A Faturar no mes atual
             fat_vs_data = pd.DataFrame({
                 'Categoria': ['Faturado', 'A Faturar'],
-                'Valor': [fat_mes_valor, valor_a_faturar]
+                'Valor': [realizado_mes_atual, valor_a_faturar]
             })
             fig_vs = px.pie(fat_vs_data, values='Valor', names='Categoria',
                            title=f'Faturado vs A Faturar - {mes_atual_str}',
