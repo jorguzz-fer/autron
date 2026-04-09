@@ -583,13 +583,23 @@ def carregar_e_processar():
                 break
 
         meta_faturamento = extrair_meta(autron_idx, 'Receita de vendas e Serviços')
-        meta_entrada = extrair_meta(autron_idx, 'Entrada de pedido')
+        meta_entrada_autron = extrair_meta(autron_idx, 'Entrada de pedido')
 
-        # Meta Receita Liquida = GRUPO (nao AUTRON)
+        # ERGOMEC section
+        ergomec_idx = None
+        for i, l in enumerate(labels):
+            if str(l).upper() == 'ERGOMEC':
+                ergomec_idx = i
+                break
+        meta_entrada_ergomec = extrair_meta(ergomec_idx, 'Entrada de pedido') if ergomec_idx else [0]*12
+
+        # Meta Receita Liquida = GRUPO
         if grupo_idx is not None:
             meta_receita_liquida = extrair_meta(grupo_idx, 'Receita líquida')
+            meta_entrada_grupo = extrair_meta(grupo_idx, 'Entrada de pedido')
         else:
             meta_receita_liquida = extrair_meta(autron_idx, 'Receita líquida')
+            meta_entrada_grupo = meta_entrada_autron
 
         meses_str = []
         for c in meses_col:
@@ -602,7 +612,9 @@ def carregar_e_processar():
             'Mes': meses_str,
             'Meta_Faturamento': meta_faturamento,
             'Meta_Receita_Liquida': meta_receita_liquida,
-            'Meta_Entrada': meta_entrada,
+            'Meta_Entrada': meta_entrada_grupo,
+            'Meta_Entrada_Autron': meta_entrada_autron,
+            'Meta_Entrada_Ergomec': meta_entrada_ergomec,
         })
 
     return merged, fat, budget, None
@@ -937,19 +949,22 @@ with tab2:
     # Entrada 2026
     ep_2026 = filtered_t2[filtered_t2['Ano_Emissao'] == 2026]
     valor_2026 = ep_2026['Vlr.Total'].sum()
-    pvs_2026 = ep_2026['Num. Pedido'].nunique()
 
-    # Meta entrada (do budget)
-    meta_entrada_total = 0
+    # Separar ERGOMEC (IND21) e AUTRON (demais)
+    ep_2026_ergomec = ep_2026[ep_2026['Unidade Negocio'] == 'IND21'] if 'Unidade Negocio' in ep_2026.columns else pd.DataFrame()
+    ep_2026_autron = ep_2026[ep_2026['Unidade Negocio'] != 'IND21'] if 'Unidade Negocio' in ep_2026.columns else ep_2026
+
+    # Meta entrada GRUPO (do budget)
+    meta_entrada_grupo = 0
     if df_budget is not None and 'Meta_Entrada' in df_budget.columns:
-        meta_entrada_total = df_budget['Meta_Entrada'].sum()
+        meta_entrada_grupo = df_budget['Meta_Entrada'].sum()
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.markdown(kpi_card(f"{total_pvs_ep}", "Total PVs"), unsafe_allow_html=True)
     c2.markdown(kpi_card(f"{total_ep:,}", "Total Linhas"), unsafe_allow_html=True)
     c3.markdown(kpi_card(f"R$ {valor_total_ep:,.0f}", "Valor Total"), unsafe_allow_html=True)
     c4.markdown(kpi_card(f"R$ {valor_2026:,.0f}", "Valor 2026"), unsafe_allow_html=True)
-    c5.markdown(kpi_card(f"R$ {meta_entrada_total:,.0f}", "Meta 2026 (Budget)"), unsafe_allow_html=True)
+    c5.markdown(kpi_card(f"R$ {meta_entrada_grupo:,.0f}", "Meta 2026 Grupo"), unsafe_allow_html=True)
 
     st.markdown("")
 
@@ -976,9 +991,9 @@ with tab2:
     with col2:
         st.dataframe(entrada_mes, use_container_width=True, height=450)
 
-    # Meta x Realizado Entrada (Budget) - apenas 2026
+    # === Meta x Realizado GRUPO ===
     if df_budget is not None and 'Meta_Entrada' in df_budget.columns:
-        st.markdown("### 📊 Meta x Realizado - Entrada de Pedidos 2026")
+        st.markdown("### 📊 Meta x Realizado - Grupo (Entrada de Pedidos 2026)")
 
         ep_mes_2026 = ep_2026.groupby('Mes_Emissao').agg(
             Realizado=('Vlr.Total', 'sum'),
@@ -1006,7 +1021,7 @@ with tab2:
             ))
             fig_comp_ent.update_layout(
                 barmode='group',
-                title='Meta x Realizado - Entrada de Pedidos 2026',
+                title='Meta Grupo x Realizado - 2026',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
                 legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
@@ -1018,6 +1033,68 @@ with tab2:
             comp_ent_display['Realizado'] = comp_ent_display['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
             comp_ent_display['Ating. %'] = comp_ent_display['Ating. %'].apply(lambda x: f"{x:.1f}%")
             st.dataframe(comp_ent_display, use_container_width=True, height=400)
+
+        # === Meta x Realizado AUTRON (sem IND21) ===
+        st.markdown("### 📊 Meta x Realizado - Autron (sem Ergomec)")
+
+        ep_autron_mes = ep_2026_autron.groupby('Mes_Emissao').agg(
+            Realizado=('Vlr.Total', 'sum'),
+        ).reset_index().rename(columns={'Mes_Emissao': 'Mes'}) if len(ep_2026_autron) > 0 else pd.DataFrame(columns=['Mes', 'Realizado'])
+
+        comp_autron = df_budget[['Mes', 'Meta_Entrada_Autron']].copy()
+        comp_autron.rename(columns={'Meta_Entrada_Autron': 'Meta'}, inplace=True)
+        comp_autron = comp_autron.merge(ep_autron_mes, on='Mes', how='outer').fillna(0).sort_values('Mes')
+        comp_autron = comp_autron[comp_autron['Mes'].str.startswith('2026')]
+        comp_autron['Ating. %'] = np.where(comp_autron['Meta'] > 0,
+            (comp_autron['Realizado'] / comp_autron['Meta'] * 100), 0)
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_a = go.Figure()
+            fig_a.add_trace(go.Bar(x=comp_autron['Mes'], y=comp_autron['Meta'], name='Meta', marker_color='#4472C4', opacity=0.7))
+            fig_a.add_trace(go.Bar(x=comp_autron['Mes'], y=comp_autron['Realizado'], name='Realizado', marker_color='#ED7D31'))
+            fig_a.update_layout(barmode='group', title='Meta Autron x Realizado - 2026',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=350,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5))
+            st.plotly_chart(fig_a, use_container_width=True)
+        with col2:
+            ca_d = comp_autron.copy()
+            ca_d['Meta'] = ca_d['Meta'].apply(lambda x: f"R$ {x:,.0f}")
+            ca_d['Realizado'] = ca_d['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            ca_d['Ating. %'] = ca_d['Ating. %'].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(ca_d, use_container_width=True, height=350)
+
+        # === Meta x Realizado ERGOMEC (IND21) ===
+        st.markdown("### 📊 Meta x Realizado - Ergomec (IND21)")
+
+        ep_ergomec_mes = ep_2026_ergomec.groupby('Mes_Emissao').agg(
+            Realizado=('Vlr.Total', 'sum'),
+        ).reset_index().rename(columns={'Mes_Emissao': 'Mes'}) if len(ep_2026_ergomec) > 0 else pd.DataFrame(columns=['Mes', 'Realizado'])
+
+        comp_ergomec = df_budget[['Mes', 'Meta_Entrada_Ergomec']].copy()
+        comp_ergomec.rename(columns={'Meta_Entrada_Ergomec': 'Meta'}, inplace=True)
+        comp_ergomec = comp_ergomec.merge(ep_ergomec_mes, on='Mes', how='outer').fillna(0).sort_values('Mes')
+        comp_ergomec = comp_ergomec[comp_ergomec['Mes'].str.startswith('2026')]
+        comp_ergomec['Ating. %'] = np.where(comp_ergomec['Meta'] > 0,
+            (comp_ergomec['Realizado'] / comp_ergomec['Meta'] * 100), 0)
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_e = go.Figure()
+            fig_e.add_trace(go.Bar(x=comp_ergomec['Mes'], y=comp_ergomec['Meta'], name='Meta', marker_color='#4472C4', opacity=0.7))
+            fig_e.add_trace(go.Bar(x=comp_ergomec['Mes'], y=comp_ergomec['Realizado'], name='Realizado', marker_color='#70AD47'))
+            fig_e.update_layout(barmode='group', title='Meta Ergomec x Realizado - 2026',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=350,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5))
+            st.plotly_chart(fig_e, use_container_width=True)
+        with col2:
+            ce_d = comp_ergomec.copy()
+            ce_d['Meta'] = ce_d['Meta'].apply(lambda x: f"R$ {x:,.0f}")
+            ce_d['Realizado'] = ce_d['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            ce_d['Ating. %'] = ce_d['Ating. %'].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(ce_d, use_container_width=True, height=350)
 
 
 # ===== ABA 3: PRONTIDAO =====
