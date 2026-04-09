@@ -272,12 +272,14 @@ def filtro_data(data_df, col_data, label, tab_key):
     with col_f1:
         dt_ini = st.date_input(
             f"De ({label})", value=data_min, min_value=data_min,
-            max_value=data_max, key=f"dt_ini_{tab_key}"
+            max_value=data_max, key=f"dt_ini_{tab_key}",
+            format="DD/MM/YYYY"
         )
     with col_f2:
         dt_fim = st.date_input(
             f"Ate ({label})", value=data_max, min_value=data_min,
-            max_value=data_max, key=f"dt_fim_{tab_key}"
+            max_value=data_max, key=f"dt_fim_{tab_key}",
+            format="DD/MM/YYYY"
         )
     with col_f3:
         st.markdown("")
