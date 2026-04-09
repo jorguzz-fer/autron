@@ -6,10 +6,6 @@ import plotly.graph_objects as go
 from datetime import datetime
 import hashlib
 import os
-import io
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 # ========================================================================
 # CONFIGURACAO
@@ -262,62 +258,91 @@ def kpi_card(valor, label, tipo="normal"):
     """
 
 
+def filtro_data(data_df, col_data, label, tab_key):
+    """Exibe filtro de data (inicio/fim) e retorna o dataframe filtrado.
+    Filtra graficos e tabelas da aba correspondente."""
+    datas_validas = data_df[col_data].dropna()
+    if len(datas_validas) == 0:
+        return data_df
+
+    data_min = datas_validas.min().date()
+    data_max = datas_validas.max().date()
+
+    col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+    with col_f1:
+        dt_ini = st.date_input(
+            f"De ({label})", value=data_min, min_value=data_min,
+            max_value=data_max, key=f"dt_ini_{tab_key}"
+        )
+    with col_f2:
+        dt_fim = st.date_input(
+            f"Ate ({label})", value=data_max, min_value=data_min,
+            max_value=data_max, key=f"dt_fim_{tab_key}"
+        )
+    with col_f3:
+        st.markdown("")
+
+    dt_ini = pd.Timestamp(dt_ini)
+    dt_fim = pd.Timestamp(dt_fim) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
+    mask = (data_df[col_data] >= dt_ini) & (data_df[col_data] <= dt_fim)
+    # Manter linhas sem data (nao excluir por falta de informacao)
+    mask = mask | data_df[col_data].isna()
+    return data_df[mask]
+
+
 # ========================================================================
 # CARGA E PROCESSAMENTO DE DADOS
 # ========================================================================
 @st.cache_data(ttl=300)
 def carregar_e_processar():
-    """Carrega os arquivos e processa toda a logica de negocio."""
+    """Carrega os 5 arquivos e processa toda a logica de negocio."""
 
     arq_entrada = os.path.join(DATA_DIR, "entrada_pedido.xlsx")
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
-    arq_estoque = os.path.join(DATA_DIR, "matr260.xlsx")
+    arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
     arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
+    # Aceitar ambos os nomes do CSV
+    arq_sciozmq = os.path.join(DATA_DIR, "sciozvs0.csv")
+    if not os.path.exists(arq_sciozmq):
+        arq_sciozmq = os.path.join(DATA_DIR, "sciozmq0.csv")
 
-    # CSV pode ter nomes diferentes
-    arq_scio = os.path.join(DATA_DIR, "sciozvs0.csv")
-    if not os.path.exists(arq_scio):
-        arq_scio = os.path.join(DATA_DIR, "sciozmq0.csv")
-
-    obrigatorios = [arq_entrada, arq_followup, arq_estoque, arq_scio]
-    for arq in obrigatorios:
+    for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
         if not os.path.exists(arq):
             return None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
 
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
     fu = pd.read_excel(arq_followup, header=1)
-
-    # MATR260 - detectar header e colunas automaticamente
-    mt_raw = pd.read_excel(arq_estoque, header=None, nrows=20)
-    mt_header_row = None
-    for i in range(len(mt_raw)):
-        row_upper = [str(v).strip().upper() for v in mt_raw.iloc[i].tolist()]
-        if any('SALDO EM ESTOQUE' == v for v in row_upper) or any('SALDO ATUAL' == v for v in row_upper):
-            mt_header_row = i
-            break
-    if mt_header_row is None:
-        mt_header_row = 1  # Novo formato padrao
-    mt = pd.read_excel(arq_estoque, header=mt_header_row)
-    # Normalizar nomes de colunas para formato esperado
-    col_map_estoque = {}
-    for c in mt.columns:
-        cu = str(c).strip().upper()
-        if cu == 'SALDO ATUAL':
-            col_map_estoque[c] = 'SALDO EM ESTOQUE'
-        elif cu == 'CODIGO':
-            col_map_estoque[c] = 'CODIGO'
-    mt = mt.rename(columns=col_map_estoque)
-    if 'CODIGO' not in mt.columns:
-        # Tentar primeira coluna como codigo
-        mt = mt.rename(columns={mt.columns[0]: 'CODIGO'})
-
-    sc_csv = pd.read_csv(arq_scio, encoding='latin-1', sep=';', header=2, low_memory=False)
-
-    # Faturamento (opcional)
+    # Faturamento (opcional - pode nao existir)
     fat = None
     if os.path.exists(arq_faturamento):
         fat = pd.read_excel(arq_faturamento, header=1)
+        fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
+        col_vlr = [c for c in fat.columns if 'vlr' in c.lower() and 'total' in c.lower()]
+        if col_vlr:
+            fat.rename(columns={col_vlr[0]: 'Vlr.Total.Fat'}, inplace=True)
+        else:
+            fat['Vlr.Total.Fat'] = 0
+        fat['Vlr.Total.Fat'] = pd.to_numeric(fat['Vlr.Total.Fat'], errors='coerce')
+        fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto', 0), errors='coerce')
+        fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido', 0), errors='coerce')
+        fat['No do Pedido'] = fat['No do Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
+        fat['Mes_Faturamento'] = fat['Emissao'].dt.to_period('M').astype(str)
+    # Tentar diferentes linhas de header para mata010
+    mt = pd.read_excel(arq_estoque)
+    mt.columns = mt.columns.astype(str).str.strip()
+    # Se nao encontrar 'Saldo Atual' ou similar, tentar header=1, header=2
+    _has_saldo = any('saldo' in c.lower() for c in mt.columns)
+    _has_codigo = any(c.lower() in ('codigo', 'código') or 'cod' in c.lower() for c in mt.columns)
+    if not _has_saldo and not _has_codigo:
+        mt = pd.read_excel(arq_estoque, header=1)
+        mt.columns = mt.columns.astype(str).str.strip()
+        _has_saldo = any('saldo' in c.lower() for c in mt.columns)
+        if not _has_saldo:
+            mt = pd.read_excel(arq_estoque, header=2)
+            mt.columns = mt.columns.astype(str).str.strip()
+    sc_csv = pd.read_csv(arq_sciozmq, encoding='latin-1', sep=';', header=2, low_memory=False)
 
     # Limpar entrada_pedido
     ep['Num. Pedido'] = ep['Num. Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
@@ -333,9 +358,6 @@ def carregar_e_processar():
     if 'Numero OP' not in ep.columns:
         ep['Numero OP'] = np.nan
 
-    # Filtrar PVs que iniciam com I ou B (desconsiderar completamente)
-    ep = ep[~ep['Num. Pedido'].str.upper().str.match(r'^[IB]', na=False)]
-
     # Limpar follow-up
     fu['No. da S.C.'] = pd.to_numeric(fu['No. da S.C.'], errors='coerce')
     fu['Dt. Confirma'] = pd.to_datetime(fu['Dt. Confirma'], errors='coerce')
@@ -346,8 +368,29 @@ def carregar_e_processar():
     if 'OP na SC' not in fu.columns:
         fu['OP na SC'] = np.nan
 
-    # Limpar estoque (MATR260)
-    mt['SALDO EM ESTOQUE'] = pd.to_numeric(mt['SALDO EM ESTOQUE'], errors='coerce').fillna(0)
+    # Limpar estoque - normalizar nomes de colunas
+    mt.columns = mt.columns.astype(str).str.strip()
+    col_saldo = [c for c in mt.columns if 'saldo' in c.lower() and 'atual' in c.lower()]
+    if col_saldo:
+        mt.rename(columns={col_saldo[0]: 'Saldo Atual'}, inplace=True)
+    col_codigo = [c for c in mt.columns if c.lower().strip() in ('codigo', 'código', 'cod', 'cod.')]
+    if col_codigo:
+        mt.rename(columns={col_codigo[0]: 'Codigo'}, inplace=True)
+    if 'Codigo' not in mt.columns:
+        col_codigo_alt = [c for c in mt.columns if 'codig' in c.lower() or 'cod' in c.lower() or 'produto' in c.lower() or 'item' in c.lower() or 'b1_cod' in c.lower()]
+        if col_codigo_alt:
+            mt.rename(columns={col_codigo_alt[0]: 'Codigo'}, inplace=True)
+        else:
+            # Usar primeira coluna como codigo (fallback)
+            mt.rename(columns={mt.columns[0]: 'Codigo'}, inplace=True)
+    if 'Saldo Atual' not in mt.columns:
+        # Tentar coluna que contenha 'saldo'
+        col_saldo_alt = [c for c in mt.columns if 'saldo' in c.lower()]
+        if col_saldo_alt:
+            mt.rename(columns={col_saldo_alt[0]: 'Saldo Atual'}, inplace=True)
+        else:
+            mt['Saldo Atual'] = 0
+    mt['Saldo Atual'] = pd.to_numeric(mt['Saldo Atual'], errors='coerce').fillna(0)
 
     # Classificacao Comprando/Produzindo
     sc_csv['Produto'] = sc_csv['Produto'].astype(str).str.strip()
@@ -390,7 +433,7 @@ def carregar_e_processar():
     merged['FU_Dt_Chegada_Autron'] = merged['Dt Chegada Autron'].combine_first(merged['FU_Dt_Chegada_PV'])
     merged['FU_OP_na_SC'] = merged['OP na SC'].combine_first(merged['FU_OP_na_SC_PV'])
 
-    merged['Prazo_Real_Entrega'] = merged['FU_Dt_Confirma'].combine_first(merged['FU_Dt_Pre_Entr']).astype(object)
+    merged['Prazo_Real_Entrega'] = merged['FU_Dt_Confirma'].combine_first(merged['FU_Dt_Pre_Entr'])
     merged['Semana_Entrega'] = np.where(merged['FU_Dt_Confirma'].notna(), merged['FU_Pasta'], None)
 
     # Tipo produto
@@ -400,9 +443,9 @@ def carregar_e_processar():
     # Status
     merged['Status_Pedido'] = np.where(merged['Nota Fiscal'].notna(), 'FINALIZADO', 'EM ABERTO')
 
-    # Estoque (MATR260)
-    stock = mt.groupby('CODIGO')['SALDO EM ESTOQUE'].sum().reset_index()
-    stock.rename(columns={'CODIGO': 'Produto', 'SALDO EM ESTOQUE': 'Estoque_Disponivel'}, inplace=True)
+    # Estoque
+    stock = mt.groupby('Codigo')['Saldo Atual'].sum().reset_index()
+    stock.rename(columns={'Codigo': 'Produto', 'Saldo Atual': 'Estoque_Disponivel'}, inplace=True)
     merged = merged.merge(stock, on='Produto', how='left')
     merged['Estoque_Disponivel'] = merged['Estoque_Disponivel'].fillna(0)
 
@@ -428,24 +471,6 @@ def carregar_e_processar():
     merged.loc[merged['Status_Pedido'] == 'FINALIZADO', 'Disponivel_Estoque'] = 'N/A'
     merged.loc[merged['Status_Pedido'] == 'FINALIZADO', 'Qtd_Alocada'] = None
 
-    # Identificar itens de servico pela descricao (contem "servico" ou "serviço")
-    merged['_eh_servico'] = merged['Descricao do Produto'].astype(str).str.lower().str.contains(
-        r'servi[cç]o', regex=True, na=False
-    )
-    # Para servicos: disponibilidade = "Serviço", sem alocacao de estoque
-    merged.loc[merged['_eh_servico'] & (merged['Status_Pedido'] == 'EM ABERTO'), 'Disponivel_Estoque'] = 'Serviço'
-    merged.loc[merged['_eh_servico'] & (merged['Status_Pedido'] == 'EM ABERTO'), 'Qtd_Alocada'] = None
-
-    # IND21 com "posto" ou "cabine" na descricao: prazo "A definir"
-    _eh_ind21_posto_cabine = (
-        merged['Unidade Negocio'].astype(str).str.strip().str.upper().eq('IND21') &
-        merged['Descricao do Produto'].astype(str).str.lower().str.contains(r'posto|cabine', regex=True, na=False) &
-        (merged['Status_Pedido'] == 'EM ABERTO')
-    )
-    merged.loc[_eh_ind21_posto_cabine, 'Prazo_Real_Entrega'] = 'A definir'
-    merged.loc[_eh_ind21_posto_cabine, 'FU_Dt_Confirma'] = None
-    merged.loc[_eh_ind21_posto_cabine, 'FU_Dt_Pre_Entr'] = None
-
     # Regras SC/OP
     merged['Tem_SC'] = merged['Numero SC'].notna()
     merged['Tem_OP'] = (
@@ -456,8 +481,6 @@ def carregar_e_processar():
     def gerar_acao(row):
         if row['Status_Pedido'] == 'FINALIZADO':
             return 'Finalizado'
-        if row.get('_eh_servico', False):
-            return 'Prazo a confirmar'
         if row['Disponivel_Estoque'] == 'SIM':
             return 'Estoque OK'
         tipo = str(row.get('Tipo_Produto', '')).strip()
@@ -503,268 +526,32 @@ def carregar_e_processar():
         )
     )
 
+    # Mes previsto de faturamento (baseado em Dt Chegada Autron)
+    merged['Mes_Prev_Faturamento'] = merged['FU_Dt_Chegada_Autron'].dt.to_period('M').astype(str)
+    merged.loc[merged['FU_Dt_Chegada_Autron'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
+
     return merged, fat, None
-
-
-# ========================================================================
-# GERAR EXCEL PARA DOWNLOAD
-# ========================================================================
-def gerar_excel_consolidado(df, fat=None):
-    """Gera o Excel consolidado no mesmo formato do dashboard_pedidos_powerbi.xlsx."""
-    wb = Workbook()
-    header_font = Font(name='Arial', bold=True, color='FFFFFF', size=10)
-    header_fill = PatternFill('solid', fgColor='2F5496')
-    data_font = Font(name='Arial', size=9)
-    thin_border = Border(
-        left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'),
-        top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9')
-    )
-    fill_verde = PatternFill('solid', fgColor='C6EFCE')
-    fill_amarelo = PatternFill('solid', fgColor='FFEB9C')
-    fill_vermelho = PatternFill('solid', fgColor='FFC7CE')
-    fill_erro = PatternFill('solid', fgColor='FF4444')
-    font_erro = Font(name='Arial', size=9, bold=True, color='FFFFFF')
-
-    output_cols = [
-        'Num. Pedido', 'Item', 'Cliente', 'Razao Social', 'Nome Fantasia',
-        'Produto', 'Descricao do Produto', 'Tipo_Produto', 'Quantidade',
-        'Prc Unitario', 'Vlr.Total', 'Margem',
-        'DT Emissao', 'Entrega', 'Mes_Emissao', 'Ano_Emissao',
-        'DT. Ofertada', 'DT. Fat. Cli', 'Ped Cliente',
-        'Prazo_Real_Entrega', 'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Semana_Entrega',
-        'FU_Dt_Chegada_Autron', 'FU_PO', 'FU_OP_na_SC',
-        'Nota Fiscal', 'Status_Pedido',
-        'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
-        'Acao_Necessaria', 'Pronto_para_Fazer',
-        'Dias_Atraso_Ofertada', 'Dias_Atraso_Cliente',
-        'Numero SC', 'Numero OP', 'TP Venda (PV)', 'Tipo Negocio (PV)',
-        'Nome do Vendedor', 'Familia', 'Fabricante',
-        'Unidade Negocio', 'Estado', 'Regional (PV)',
-        'Nome do Segmento 1', 'Nome do Segmento 2', 'Nome do Segmento 3',
-        'Descr. Cond Pagto'
-    ]
-    header_map = {
-        'Num. Pedido': 'PV', 'Item': 'Item', 'Cliente': 'Cod Cliente',
-        'Razao Social': 'Razao Social', 'Nome Fantasia': 'Nome Fantasia',
-        'Produto': 'Codigo Produto', 'Descricao do Produto': 'Descricao Produto',
-        'Tipo_Produto': 'Tipo (Comprando/Produzindo)',
-        'Quantidade': 'Qtd', 'Prc Unitario': 'Preco Unit.', 'Vlr.Total': 'Valor Total',
-        'Margem': 'Margem %', 'DT Emissao': 'Data Emissao', 'Entrega': 'Entrega',
-        'Mes_Emissao': 'Mes Emissao',
-        'Ano_Emissao': 'Ano Emissao', 'DT. Ofertada': 'Data Ofertada',
-        'DT. Fat. Cli': 'Data Solicitada Cliente', 'Ped Cliente': 'Pedido Cliente',
-        'Prazo_Real_Entrega': 'Prazo Real Entrega', 'FU_Dt_Confirma': 'Follow-Up Dt Confirmada',
-        'FU_Dt_Pre_Entr': 'Follow-Up Dt Pre-Entrega', 'Semana_Entrega': 'Semana Entrega (Pasta)',
-        'FU_Dt_Chegada_Autron': 'Dt Chegada Autron',
-        'FU_PO': 'Purchase Order', 'FU_OP_na_SC': 'OP na SC',
-        'Nota Fiscal': 'Nota Fiscal', 'Status_Pedido': 'Status',
-        'Estoque_Disponivel': 'Estoque Disponivel', 'Qtd_Alocada': 'Qtd Alocada Estoque',
-        'Disponivel_Estoque': 'Disponibilidade Estoque',
-        'Acao_Necessaria': 'Acao Necessaria', 'Pronto_para_Fazer': 'Pronto p/ Faturar?',
-        'Dias_Atraso_Ofertada': 'Dias Atraso vs Ofertada',
-        'Dias_Atraso_Cliente': 'Dias Atraso vs Cliente',
-        'Numero SC': 'No SC', 'Numero OP': 'No OP',
-        'TP Venda (PV)': 'Tipo Venda', 'Tipo Negocio (PV)': 'Tipo Negocio',
-        'Nome do Vendedor': 'Vendedor', 'Familia': 'Familia', 'Fabricante': 'Fabricante',
-        'Unidade Negocio': 'Unidade Negocio', 'Estado': 'Estado',
-        'Regional (PV)': 'Regional', 'Nome do Segmento 1': 'Segmento 1',
-        'Nome do Segmento 2': 'Segmento 2', 'Nome do Segmento 3': 'Segmento 3',
-        'Descr. Cond Pagto': 'Cond. Pagamento'
-    }
-
-    cols = [c for c in output_cols if c in df.columns]
-    headers = [header_map.get(c, c) for c in cols]
-    output = df[cols].copy().sort_values(['Status_Pedido', 'DT Emissao', 'Num. Pedido', 'Item'])
-
-    date_cols = {'DT Emissao', 'Entrega', 'DT. Ofertada', 'DT. Fat. Cli',
-                 'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'FU_Dt_Chegada_Autron'}
-    # Prazo_Real_Entrega pode ser data ou string ("A definir"), tratar separadamente
-    date_or_str_cols = {'Prazo_Real_Entrega'}
-    col_idx_map = {c: i for i, c in enumerate(cols)}
-
-    # --- Aba Pedidos_Consolidado ---
-    ws = wb.active
-    ws.title = 'Pedidos_Consolidado'
-    for ci, h in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=ci, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = thin_border
-
-    for ri, (_, row) in enumerate(output.iterrows(), 2):
-        for ci, col_name in enumerate(cols, 1):
-            val = row[col_name]
-            if pd.isna(val): val = None
-            elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
-            elif isinstance(val, (np.int64, np.float64)):
-                val = float(val) if not np.isnan(val) else None
-            cell = ws.cell(row=ri, column=ci, value=val)
-            cell.font = data_font
-            cell.border = thin_border
-            if col_name in date_cols and val is not None: cell.number_format = 'DD/MM/YYYY'
-            elif col_name in date_or_str_cols and isinstance(val, pd.Timestamp): cell.number_format = 'DD/MM/YYYY'
-            elif col_name == 'Margem' and val is not None: cell.number_format = '0.00%'
-            elif col_name in ('Prc Unitario', 'Vlr.Total') and val is not None: cell.number_format = '#,##0.00'
-
-        # Cores condicionais
-        for field, fills in [
-            ('Status_Pedido', {'FINALIZADO': fill_verde, 'EM ABERTO': fill_vermelho}),
-            ('Disponivel_Estoque', {'SIM': fill_verde, 'PARCIAL': fill_amarelo, 'NAO': fill_vermelho, 'Serviço': fill_amarelo}),
-        ]:
-            idx = col_idx_map.get(field)
-            if idx is not None:
-                c = ws.cell(row=ri, column=idx + 1)
-                f = fills.get(c.value)
-                if f: c.fill = f
-
-        idx = col_idx_map.get('Pronto_para_Fazer')
-        if idx is not None:
-            c = ws.cell(row=ri, column=idx + 1)
-            v = c.value
-            if v in ('SIM', 'FINALIZADO'): c.fill = fill_verde
-            elif v and 'PARCIAL' in str(v): c.fill = fill_amarelo
-            elif v == 'NAO': c.fill = fill_vermelho
-
-        idx = col_idx_map.get('Acao_Necessaria')
-        if idx is not None:
-            c = ws.cell(row=ri, column=idx + 1)
-            v = c.value
-            if v == 'ERRO no CADASTRO': c.fill = fill_erro; c.font = font_erro
-            elif v == 'Estoque OK': c.fill = fill_verde
-            elif v == 'Prazo a confirmar': c.fill = fill_amarelo
-            elif v and 'Necessario' in str(v): c.fill = fill_vermelho
-            elif v and ('gerada' in str(v) or 'Aguardando' in str(v)): c.fill = fill_amarelo
-
-    for ci in range(1, len(headers) + 1):
-        max_len = len(str(ws.cell(row=1, column=ci).value or ''))
-        for ri in range(2, min(100, ws.max_row + 1)):
-            max_len = max(max_len, len(str(ws.cell(row=ri, column=ci).value or '')))
-        ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 35)
-    ws.freeze_panes = 'A2'
-    ws.auto_filter.ref = f'A1:{get_column_letter(len(headers))}{ws.max_row}'
-
-    # --- Aba Estoque_Pedidos_Abertos ---
-    ws2 = wb.create_sheet('Estoque_Pedidos_Abertos')
-    open_cols = [c for c in ['Produto', 'Descricao do Produto', 'Tipo_Produto', 'Num. Pedido', 'Item',
-        'Quantidade', 'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
-        'Acao_Necessaria', 'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'DT Emissao'] if c in output.columns]
-    open_data = output[output['Status_Pedido'] == 'EM ABERTO'][open_cols].sort_values(['Produto', 'DT Emissao'])
-    headers2 = ['Codigo Produto', 'Descricao', 'Tipo (Comp/Prod)', 'PV', 'Item', 'Qtd Pedida',
-                'Estoque Total', 'Qtd Alocada', 'Disponibilidade', 'Acao Necessaria',
-                'No SC', 'No OP', 'OP na SC (Follow-up)', 'Data Emissao PV']
-    for ci, h in enumerate(headers2, 1):
-        cell = ws2.cell(row=1, column=ci, value=h)
-        cell.font = header_font; cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = thin_border
-    for ri, (_, row) in enumerate(open_data.iterrows(), 2):
-        for ci, col in enumerate(open_data.columns, 1):
-            val = row[col]
-            if pd.isna(val): val = None
-            elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
-            elif isinstance(val, (np.int64, np.float64)):
-                val = float(val) if not np.isnan(val) else None
-            cell = ws2.cell(row=ri, column=ci, value=val)
-            cell.font = data_font; cell.border = thin_border
-            if col == 'DT Emissao' and val: cell.number_format = 'DD/MM/YYYY'
-        c = ws2.cell(row=ri, column=9)
-        if c.value == 'SIM': c.fill = fill_verde
-        elif c.value == 'PARCIAL': c.fill = fill_amarelo
-        elif c.value == 'NAO': c.fill = fill_vermelho
-        elif c.value == 'Serviço': c.fill = fill_amarelo
-        c2 = ws2.cell(row=ri, column=10)
-        if c2.value == 'ERRO no CADASTRO': c2.fill = fill_erro; c2.font = font_erro
-        elif c2.value == 'Estoque OK': c2.fill = fill_verde
-        elif c2.value == 'Prazo a confirmar': c2.fill = fill_amarelo
-        elif c2.value and 'Necessario' in str(c2.value): c2.fill = fill_vermelho
-        elif c2.value and 'gerada' in str(c2.value): c2.fill = fill_amarelo
-    for ci in range(1, len(headers2) + 1):
-        max_len = len(str(ws2.cell(row=1, column=ci).value or ''))
-        for ri in range(2, min(50, ws2.max_row + 1)):
-            max_len = max(max_len, len(str(ws2.cell(row=ri, column=ci).value or '')))
-        ws2.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
-    ws2.freeze_panes = 'A2'
-    ws2.auto_filter.ref = f'A1:{get_column_letter(len(headers2))}{ws2.max_row}'
-
-    # --- Aba Faturamento (se disponivel) ---
-    if fat is not None and len(fat) > 0:
-        ws3 = wb.create_sheet('Faturamento')
-        fat_cols = [c for c in ['Emissao', 'Num. Docto.', 'Serie', 'No do Pedido', 'Item Pv', 'Produto',
-            'Descricao Produto', 'Quantidade', 'Vlr.Unitario', 'Vlr. Total (quant * preco un)',
-            'Vlr.Bruto', 'Cliente', 'Razao Social', 'Nome Fantasia', 'UF',
-            'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
-            'Margem Liquida (%) por NF Faturada', 'Nome do Vendedor', 'Tipo Negocio',
-            'TP Venda', 'Regional', 'Unid Negocio'] if c in fat.columns]
-        for ci, h in enumerate(fat_cols, 1):
-            cell = ws3.cell(row=1, column=ci, value=h)
-            cell.font = header_font; cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.border = thin_border
-        for ri, (_, row) in enumerate(fat[fat_cols].iterrows(), 2):
-            for ci, col in enumerate(fat_cols, 1):
-                val = row[col]
-                if pd.isna(val): val = None
-                elif isinstance(val, pd.Timestamp): val = val.to_pydatetime()
-                elif isinstance(val, (np.int64, np.float64)):
-                    val = float(val) if not np.isnan(val) else None
-                cell = ws3.cell(row=ri, column=ci, value=val)
-                cell.font = data_font; cell.border = thin_border
-                if col == 'Emissao' and val: cell.number_format = 'DD/MM/YYYY'
-                elif col in ('Vlr.Unitario', 'Vlr. Total (quant * preco un)', 'Vlr.Bruto',
-                              'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)'):
-                    if val is not None: cell.number_format = '#,##0.00'
-        for ci in range(1, len(fat_cols) + 1):
-            max_len = len(str(ws3.cell(row=1, column=ci).value or ''))
-            for ri in range(2, min(50, ws3.max_row + 1)):
-                max_len = max(max_len, len(str(ws3.cell(row=ri, column=ci).value or '')))
-            ws3.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 35)
-        ws3.freeze_panes = 'A2'
-        ws3.auto_filter.ref = f'A1:{get_column_letter(len(fat_cols))}{ws3.max_row}'
-
-    # Salvar em buffer
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
 
 
 # ========================================================================
 # UPLOAD E GESTAO DE ARQUIVOS
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
-ARQUIVOS_OBRIGATORIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'matr260.xlsx']
-ARQUIVOS_CSV = ['sciozvs0.csv', 'sciozmq0.csv']  # aceita qualquer um dos dois
-ARQUIVO_OPCIONAL = 'faturamento.xlsx'
+ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozvs0.csv']
+ARQUIVOS_OPCIONAIS = ['faturamento.xlsx']
 
 
 def verificar_arquivos():
     """Retorna lista de arquivos presentes e ausentes."""
     presentes = []
     ausentes = []
-    for f in ARQUIVOS_OBRIGATORIOS:
+    for f in ARQUIVOS_NECESSARIOS:
         caminho = os.path.join(DATA_DIR, f)
         if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
             mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
             presentes.append((f, mod_time))
         else:
             ausentes.append(f)
-    # CSV - qualquer um dos dois nomes
-    csv_encontrado = False
-    for csv_name in ARQUIVOS_CSV:
-        caminho = os.path.join(DATA_DIR, csv_name)
-        if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
-            mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
-            presentes.append((csv_name, mod_time))
-            csv_encontrado = True
-            break
-    if not csv_encontrado:
-        ausentes.append('sciozvs0.csv (ou sciozmq0.csv)')
-    # Faturamento (opcional)
-    caminho = os.path.join(DATA_DIR, ARQUIVO_OPCIONAL)
-    if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
-        mod_time = datetime.fromtimestamp(os.path.getmtime(caminho))
-        presentes.append((ARQUIVO_OPCIONAL + ' (opcional)', mod_time))
     return presentes, ausentes
 
 
@@ -774,7 +561,7 @@ def tela_upload():
     <div style="text-align: center; padding: 40px 0 20px 0;">
         <h1 style="color: #4FC3F7;">📦 Dashboard de Pedidos</h1>
         <p style="color: #B0BEC5; font-size: 1.1rem;">
-            Envie os relatorios para gerar o dashboard
+            Envie os 4 relatorios para gerar o dashboard
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -796,7 +583,7 @@ def tela_upload():
     st.markdown("---")
     st.markdown("### Envie os arquivos:")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         up_entrada = st.file_uploader(
             "📋 entrada_pedido.xlsx",
@@ -808,27 +595,30 @@ def tela_upload():
             type=['xlsx'], key='up_followup',
             help="Relatorio de follow-up de compras"
         )
-        up_faturamento = st.file_uploader(
-            "💰 faturamento.xlsx (opcional)",
-            type=['xlsx'], key='up_faturamento',
-            help="Relatorio de faturamento"
-        )
     with col2:
         up_mata = st.file_uploader(
-            "📦 matr260.xlsx",
+            "📦 mata010.xlsx",
             type=['xlsx'], key='up_mata',
-            help="Relatorio de estoque (MATR260)"
+            help="Relatorio de estoque (MATA010)"
         )
         up_scio = st.file_uploader(
-            "🏭 sciozvs0.csv / sciozmq0.csv",
+            "🏭 sciozvs0.csv",
             type=['csv'], key='up_scio',
             help="Relatorio SC com classificacao Comprando/Produzindo"
+        )
+    with col3:
+        up_fat = st.file_uploader(
+            "💰 faturamento.xlsx",
+            type=['xlsx'], key='up_fat',
+            help="Relatorio de faturamento (NFs emitidas)"
         )
 
     uploads = {
         'entrada_pedido.xlsx': up_entrada,
         'followup.xlsx': up_followup,
-        'matr260.xlsx': up_mata,
+        'mata010.xlsx': up_mata,
+        'sciozvs0.csv': up_scio,
+        'faturamento.xlsx': up_fat,
     }
 
     # Salvar arquivos enviados
@@ -838,19 +628,6 @@ def tela_upload():
             with open(os.path.join(DATA_DIR, nome), 'wb') as f:
                 f.write(uploaded.getbuffer())
             algum_novo = True
-
-    # CSV - salvar com o nome original do arquivo
-    if up_scio is not None:
-        csv_save_name = up_scio.name if up_scio.name in ARQUIVOS_CSV else 'sciozvs0.csv'
-        with open(os.path.join(DATA_DIR, csv_save_name), 'wb') as f:
-            f.write(up_scio.getbuffer())
-        algum_novo = True
-
-    # Faturamento (opcional)
-    if up_faturamento is not None:
-        with open(os.path.join(DATA_DIR, ARQUIVO_OPCIONAL), 'wb') as f:
-            f.write(up_faturamento.getbuffer())
-        algum_novo = True
 
     # Verificar novamente apos upload
     presentes, ausentes = verificar_arquivos()
@@ -876,13 +653,14 @@ if len(ausentes) > 0:
 # ========================================================================
 # CARREGAR DADOS
 # ========================================================================
-df, fat_df, erro = carregar_e_processar()
+df, df_fat, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
+    # Limpar arquivos corrompidos e forcar novo upload
     st.warning("Pode haver um problema com os arquivos. Tente enviar novamente.")
     if st.button("🔄 Reenviar arquivos"):
-        for f in ARQUIVOS_OBRIGATORIOS + ARQUIVOS_CSV + [ARQUIVO_OPCIONAL]:
+        for f in ARQUIVOS_NECESSARIOS:
             caminho = os.path.join(DATA_DIR, f)
             if os.path.exists(caminho):
                 os.remove(caminho)
@@ -923,7 +701,7 @@ with st.sidebar:
 
     # Pronto para Fazer
     pronto_opts = sorted(df['Pronto_para_Fazer'].unique())
-    pronto_sel = st.multiselect("Pronto p/ Faturar?", pronto_opts, default=[])
+    pronto_sel = st.multiselect("Pronto p/ Fazer?", pronto_opts, default=[])
 
     st.markdown("---")
 
@@ -936,30 +714,12 @@ with st.sidebar:
 
     # Botao para atualizar arquivos
     if st.button("📤 Atualizar Arquivos", use_container_width=True):
-        for f in ARQUIVOS_OBRIGATORIOS + ARQUIVOS_CSV + [ARQUIVO_OPCIONAL]:
+        for f in ARQUIVOS_NECESSARIOS:
             caminho = os.path.join(DATA_DIR, f)
             if os.path.exists(caminho):
                 os.remove(caminho)
         st.cache_data.clear()
         st.rerun()
-
-    st.markdown("---")
-
-    # Botao download Excel
-    st.markdown("##### 📥 Exportar Planilha")
-    if st.button("Gerar Excel Consolidado", use_container_width=True, type="primary"):
-        with st.spinner("Gerando planilha..."):
-            excel_buffer = gerar_excel_consolidado(df, fat_df)
-            st.session_state['excel_pronto'] = excel_buffer
-
-    if 'excel_pronto' in st.session_state:
-        st.download_button(
-            label="⬇️ Baixar Planilha",
-            data=st.session_state['excel_pronto'],
-            file_name=f"dashboard_pedidos_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
 
     st.markdown("---")
     ultima_att = datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -1007,23 +767,23 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ========================================================================
 # ABAS PRINCIPAIS
 # ========================================================================
-if fat_df is not None and len(fat_df) > 0:
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao de Faturamento", "📆 Agenda de Entregas"])
-else:
-    tab1, tab2, tab3, tab4, tab7 = st.tabs(["📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega", "📦 Estoque & SC/OP", "📆 Agenda de Entregas"])
-    tab5 = None
-    tab6 = None
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega",
+    "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao Faturamento"
+])
 
 
 # ===== ABA 1: VISAO GERAL =====
 with tab1:
+    filtered_t1 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab1')
+
     # KPIs
-    total_pvs = filtered['Num. Pedido'].nunique()
-    total_linhas = len(filtered)
-    em_aberto = len(filtered[filtered['Status_Pedido'] == 'EM ABERTO'])
-    finalizados = len(filtered[filtered['Status_Pedido'] == 'FINALIZADO'])
-    valor_total = filtered['Vlr.Total'].sum()
-    valor_aberto = filtered.loc[filtered['Status_Pedido'] == 'EM ABERTO', 'Vlr.Total'].sum()
+    total_pvs = filtered_t1['Num. Pedido'].nunique()
+    total_linhas = len(filtered_t1)
+    em_aberto = len(filtered_t1[filtered_t1['Status_Pedido'] == 'EM ABERTO'])
+    finalizados = len(filtered_t1[filtered_t1['Status_Pedido'] == 'FINALIZADO'])
+    valor_total = filtered_t1['Vlr.Total'].sum()
+    valor_aberto = filtered_t1.loc[filtered_t1['Status_Pedido'] == 'EM ABERTO', 'Vlr.Total'].sum()
     pct = (finalizados / total_linhas * 100) if total_linhas > 0 else 0
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -1040,8 +800,8 @@ with tab1:
 
     with col1:
         # Entrada de pedidos por mes
-        if len(filtered) > 0:
-            pedidos_mes = filtered.groupby('Mes_Emissao').size().reset_index(name='Qtd')
+        if len(filtered_t1) > 0:
+            pedidos_mes = filtered_t1.groupby('Mes_Emissao').size().reset_index(name='Qtd')
             pedidos_mes = pedidos_mes.sort_values('Mes_Emissao')
             fig = px.bar(pedidos_mes, x='Mes_Emissao', y='Qtd',
                         title='Entrada de Pedidos por Mes',
@@ -1055,8 +815,8 @@ with tab1:
 
     with col2:
         # Status
-        if len(filtered) > 0:
-            status_count = filtered['Status_Pedido'].value_counts().reset_index()
+        if len(filtered_t1) > 0:
+            status_count = filtered_t1['Status_Pedido'].value_counts().reset_index()
             status_count.columns = ['Status', 'Qtd']
             cores_status = {'FINALIZADO': CORES['verde'], 'EM ABERTO': CORES['vermelho']}
             fig2 = px.pie(status_count, values='Qtd', names='Status',
@@ -1070,8 +830,8 @@ with tab1:
             st.plotly_chart(fig2, use_container_width=True)
 
     # Pedidos por vendedor
-    if len(filtered) > 0 and 'Nome do Vendedor' in filtered.columns:
-        vend_data = filtered.groupby(['Nome do Vendedor', 'Status_Pedido']).size().reset_index(name='Qtd')
+    if len(filtered_t1) > 0 and 'Nome do Vendedor' in filtered_t1.columns:
+        vend_data = filtered_t1.groupby(['Nome do Vendedor', 'Status_Pedido']).size().reset_index(name='Qtd')
         fig3 = px.bar(vend_data, x='Nome do Vendedor', y='Qtd', color='Status_Pedido',
                      title='Pedidos por Vendedor',
                      color_discrete_map={'FINALIZADO': CORES['verde'], 'EM ABERTO': CORES['vermelho']},
@@ -1086,35 +846,23 @@ with tab1:
 
 # ===== ABA 2: PRONTIDAO =====
 with tab2:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
-    _t2r = st.session_state.get('tab2_reset', 0)
+    filtered_t2 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab2')
+    abertos = filtered_t2[filtered_t2['Status_Pedido'] == 'EM ABERTO']
 
     prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'SIM'])
     parciais = len(abertos[abertos['Pronto_para_Fazer'].str.contains('PARCIAL', na=False)])
     nao_prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'NAO'])
     erros = len(abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO'])
 
-    # KPIs como botoes clicaveis
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        if st.button(f"✅ {prontos}\nProntos p/ Faturar", key="kpi_prontos", use_container_width=True):
-            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'SIM')
-    with c2:
-        if st.button(f"⚠️ {parciais}\nParcialmente Prontos", key="kpi_parciais", use_container_width=True):
-            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'PARCIAL')
-    with c3:
-        if st.button(f"🔴 {nao_prontos}\nNao Prontos", key="kpi_nao_prontos", use_container_width=True):
-            st.session_state['tab2_filtro'] = ('Pronto_para_Fazer', 'NAO')
-    with c4:
-        if st.button(f"❌ {erros}\nERROS Cadastro", key="kpi_erros_t2", use_container_width=True):
-            st.session_state['tab2_filtro'] = ('Acao_Necessaria', 'ERRO no CADASTRO')
+    c1.markdown(kpi_card(f"{prontos}", "Prontos p/ Fazer", "ok"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{parciais}", "Parcialmente Prontos", "warn"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"{nao_prontos}", "Nao Prontos", "alert"), unsafe_allow_html=True)
+    c4.markdown(kpi_card(f"{erros}", "ERROS Cadastro", "alert" if erros > 0 else "ok"), unsafe_allow_html=True)
 
     st.markdown("")
 
     col1, col2 = st.columns(2)
-
-    filtro_pronto_sel = []
-    filtro_tipo_sel = []
 
     with col1:
         if len(abertos) > 0:
@@ -1126,23 +874,20 @@ with tab2:
                 'PARCIAL - Sem Estoque': '#E67E22'
             }
             fig = px.pie(pronto_count, values='Qtd', names='Status',
-                        title='Distribuicao - Pronto p/ Faturar? (clique para filtrar)',
+                        title='Distribuicao - Pronto p/ Fazer?',
                         color='Status', color_discrete_map=cores_pronto, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            evento_pronto = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"pie_pronto_{_t2r}")
-
-            if evento_pronto and evento_pronto.selection and evento_pronto.selection.points:
-                filtro_pronto_sel = [p['label'] for p in evento_pronto.selection.points if 'label' in p]
+            st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         if len(abertos) > 0:
             tipo_count = abertos['Tipo_Produto'].value_counts().reset_index()
             tipo_count.columns = ['Tipo', 'Qtd']
             fig2 = px.bar(tipo_count, x='Tipo', y='Qtd',
-                         title='Comprando vs Produzindo (clique para filtrar)',
+                         title='Comprando vs Produzindo (Em Aberto)',
                          color='Tipo',
                          color_discrete_map={'Comprando': CORES['azul_claro'], 'Produzindo': CORES['amarelo'],
                                            'Nao classificado': CORES['cinza']})
@@ -1150,53 +895,18 @@ with tab2:
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400, showlegend=False
             )
-            evento_tipo = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_tipo_{_t2r}")
+            st.plotly_chart(fig2, use_container_width=True)
 
-            if evento_tipo and evento_tipo.selection and evento_tipo.selection.points:
-                filtro_tipo_sel = [p['x'] for p in evento_tipo.selection.points if 'x' in p]
+    # Tabela detalhada
+    st.markdown("### 📋 Detalhes - Pedidos Em Aberto")
 
-    # Aplicar filtros: KPI button OU clique no grafico
-    tabela_abertos = abertos.copy()
-    filtro_info_partes = []
-
-    # Filtro via KPI button
-    kpi_filtro = st.session_state.get('tab2_filtro')
-    if kpi_filtro:
-        campo, valor = kpi_filtro
-        if campo == 'Pronto_para_Fazer' and valor == 'PARCIAL':
-            tabela_abertos = tabela_abertos[tabela_abertos[campo].str.contains('PARCIAL', na=False)]
-            filtro_info_partes.append(f"Parcialmente Prontos")
-        else:
-            tabela_abertos = tabela_abertos[tabela_abertos[campo] == valor]
-            filtro_info_partes.append(f"{valor}")
-
-    # Filtro via clique no grafico (sobrepoe KPI se houver)
-    if filtro_pronto_sel:
-        tabela_abertos = abertos[abertos['Pronto_para_Fazer'].isin(filtro_pronto_sel)]
-        filtro_info_partes = [f"Pronto: {', '.join(filtro_pronto_sel)}"]
-        st.session_state.pop('tab2_filtro', None)
-    if filtro_tipo_sel:
-        tabela_abertos = tabela_abertos[tabela_abertos['Tipo_Produto'].isin(filtro_tipo_sel)]
-        filtro_info_partes.append(f"Tipo: {', '.join(filtro_tipo_sel)}")
-        st.session_state.pop('tab2_filtro', None)
-
-    # Botao limpar filtro
-    if filtro_info_partes or filtro_pronto_sel or filtro_tipo_sel or kpi_filtro:
-        if st.button("🧹 Limpar filtros", key="limpar_t2"):
-            st.session_state.pop('tab2_filtro', None)
-            st.session_state['tab2_reset'] = _t2r + 1
-            st.rerun()
-
-    filtro_info = f" — Filtrado por: {' | '.join(filtro_info_partes)}" if filtro_info_partes else ""
-    st.markdown(f"### 📋 Detalhes - Pedidos Em Aberto ({len(tabela_abertos)} itens){filtro_info}")
-
-    if len(tabela_abertos) > 0:
+    if len(abertos) > 0:
         tab_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
                    'Quantidade', 'Pronto_para_Fazer', 'Disponivel_Estoque', 'Acao_Necessaria',
                    'Prazo_Real_Entrega', 'Semana_Entrega', 'Ped Cliente']
-        tab_cols = [c for c in tab_cols if c in tabela_abertos.columns]
+        tab_cols = [c for c in tab_cols if c in abertos.columns]
 
-        display_df = tabela_abertos[tab_cols].copy()
+        display_df = abertos[tab_cols].copy()
         display_df.columns = ['PV', 'Item', 'Produto', 'Descricao', 'Tipo',
                              'Qtd', 'Pronto?', 'Estoque', 'Acao',
                              'Prazo Entrega', 'Semana', 'Ped Cliente'][:len(tab_cols)]
@@ -1210,7 +920,6 @@ with tab2:
         def color_acao(val):
             if val == 'ERRO no CADASTRO': return 'background-color: #C0392B; color: white; font-weight: bold'
             elif val == 'Estoque OK': return 'background-color: #1a3a1a; color: #2ECC71'
-            elif val == 'Prazo a confirmar': return 'background-color: #3a3a1a; color: #F39C12'
             elif 'Necessario' in str(val): return 'background-color: #3a1a1a; color: #E74C3C'
             elif 'gerada' in str(val): return 'background-color: #3a3a1a; color: #F39C12'
             return ''
@@ -1226,54 +935,42 @@ with tab2:
 
 # ===== ABA 3: PREVISAO ENTREGA =====
 with tab3:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
-    _t3r = st.session_state.get('tab3_reset', 0)
+    filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3')
+    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
 
-    atrasados_count = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
-    no_prazo_count = len(abertos[(abertos['Dias_Atraso_Cliente'] <= 0) & (abertos['Dias_Atraso_Cliente'].notna())])
-    sem_data_count = len(abertos[abertos['Dias_Atraso_Cliente'].isna()])
+    atrasados = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
     media_atraso = abertos.loc[abertos['Dias_Atraso_Cliente'] > 0, 'Dias_Atraso_Cliente'].mean()
+    max_atraso = abertos['Dias_Atraso_Cliente'].max()
 
-    # KPIs como botoes clicaveis
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        if st.button(f"🔴 {atrasados_count}\nAtrasados", key="kpi_atrasados_t3", use_container_width=True):
-            st.session_state['tab3_filtro'] = 'atrasados'
-    with c2:
-        if st.button(f"✅ {no_prazo_count}\nNo Prazo", key="kpi_no_prazo_t3", use_container_width=True):
-            st.session_state['tab3_filtro'] = 'no_prazo'
-    with c3:
-        if st.button(f"⚠️ {sem_data_count}\nSem Data", key="kpi_sem_data_t3", use_container_width=True):
-            st.session_state['tab3_filtro'] = 'sem_data'
-    with c4:
-        st.markdown(kpi_card(f"{media_atraso:.0f} dias" if pd.notna(media_atraso) else "0", "Media Atraso", "warn"), unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(kpi_card(f"{atrasados}", "Pedidos Atrasados", "alert" if atrasados > 0 else "ok"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{media_atraso:.0f} dias" if pd.notna(media_atraso) else "0", "Media Atraso", "warn"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"{max_atraso:.0f} dias" if pd.notna(max_atraso) else "0", "Maior Atraso", "alert"), unsafe_allow_html=True)
 
     st.markdown("")
 
     col1, col2 = st.columns(2)
 
-    filtro_semana_sel = []
-
     with col1:
+        # Pedidos por semana de entrega
         semana_data = abertos[abertos['Semana_Entrega'].notna()]
         if len(semana_data) > 0:
             sem_count = semana_data['Semana_Entrega'].value_counts().reset_index()
             sem_count.columns = ['Semana', 'Qtd']
             sem_count = sem_count.sort_values('Semana')
             fig = px.bar(sem_count, x='Semana', y='Qtd',
-                        title='Pedidos por Semana de Entrega (clique para filtrar)',
+                        title='Pedidos por Semana de Entrega (Pasta)',
                         color_discrete_sequence=[CORES['azul_claro']])
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=400
             )
-            evento_semana = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"bar_semana_t3_{_t3r}")
-            if evento_semana and evento_semana.selection and evento_semana.selection.points:
-                filtro_semana_sel = [p['x'] for p in evento_semana.selection.points if 'x' in p]
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Nenhum pedido com semana de entrega definida.")
 
     with col2:
+        # Top 10 mais atrasados
         top_atrasados = abertos.nlargest(10, 'Dias_Atraso_Cliente')[
             ['Num. Pedido', 'Produto', 'Dias_Atraso_Cliente']
         ].dropna(subset=['Dias_Atraso_Cliente'])
@@ -1290,51 +987,23 @@ with tab3:
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # Aplicar filtros
-    tabela_t3 = abertos.copy()
-    filtro_info_t3 = []
+    # Tabela previsao
+    st.markdown("### 📋 Previsao de Entrega")
 
-    kpi_filtro_t3 = st.session_state.get('tab3_filtro')
-    if kpi_filtro_t3 == 'atrasados':
-        tabela_t3 = tabela_t3[tabela_t3['Dias_Atraso_Cliente'] > 0]
-        filtro_info_t3.append("Atrasados")
-    elif kpi_filtro_t3 == 'no_prazo':
-        tabela_t3 = tabela_t3[(tabela_t3['Dias_Atraso_Cliente'] <= 0) & (tabela_t3['Dias_Atraso_Cliente'].notna())]
-        filtro_info_t3.append("No Prazo")
-    elif kpi_filtro_t3 == 'sem_data':
-        tabela_t3 = tabela_t3[tabela_t3['Dias_Atraso_Cliente'].isna()]
-        filtro_info_t3.append("Sem Data")
-
-    if filtro_semana_sel:
-        tabela_t3 = tabela_t3[tabela_t3['Semana_Entrega'].isin(filtro_semana_sel)]
-        filtro_info_t3 = [f"Semana: {', '.join(filtro_semana_sel)}"]
-        st.session_state.pop('tab3_filtro', None)
-
-    if filtro_info_t3 or kpi_filtro_t3:
-        if st.button("🧹 Limpar filtros", key="limpar_t3"):
-            st.session_state.pop('tab3_filtro', None)
-            st.session_state['tab3_reset'] = _t3r + 1
-            st.rerun()
-
-    info_t3 = f" — Filtrado por: {' | '.join(filtro_info_t3)}" if filtro_info_t3 else ""
-    st.markdown(f"### 📋 Previsao de Entrega ({len(tabela_t3)} itens){info_t3}")
-
-    if len(tabela_t3) > 0:
+    if len(abertos) > 0:
         ent_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Quantidade',
-                   'Vlr.Total', 'Descr. Cond Pagto',
                    'Ped Cliente', 'DT. Fat. Cli', 'DT. Ofertada', 'Prazo_Real_Entrega',
                    'Semana_Entrega', 'FU_Dt_Chegada_Autron', 'Dias_Atraso_Cliente', 'Pronto_para_Fazer']
-        ent_cols = [c for c in ent_cols if c in tabela_t3.columns]
+        ent_cols = [c for c in ent_cols if c in abertos.columns]
 
-        ent_df = tabela_t3[ent_cols].copy().sort_values('Dias_Atraso_Cliente', ascending=False)
+        ent_df = abertos[ent_cols].copy().sort_values('Dias_Atraso_Cliente', ascending=False)
         rename_map = {
             'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-            'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total', 'Descr. Cond Pagto': 'Cond. Pagamento',
-            'Ped Cliente': 'Ped.Cliente',
+            'Quantidade': 'Qtd', 'Ped Cliente': 'Ped.Cliente',
             'DT. Fat. Cli': 'Dt.Solicitada', 'DT. Ofertada': 'Dt.Ofertada',
             'Prazo_Real_Entrega': 'Prazo Real', 'Semana_Entrega': 'Semana',
             'FU_Dt_Chegada_Autron': 'Chegada Autron',
-            'Dias_Atraso_Cliente': 'Dias Atraso', 'Pronto_para_Fazer': 'Pronto p/ Faturar?'
+            'Dias_Atraso_Cliente': 'Dias Atraso', 'Pronto_para_Fazer': 'Pronto?'
         }
         ent_df = ent_df.rename(columns=rename_map)
 
@@ -1353,8 +1022,8 @@ with tab3:
 
 # ===== ABA 4: ESTOQUE & SC/OP =====
 with tab4:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
-    _t4r = st.session_state.get('tab4_reset', 0)
+    filtered_t4 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab4')
+    abertos = filtered_t4[filtered_t4['Status_Pedido'] == 'EM ABERTO']
 
     com_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'SIM'])
     sem_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'NAO'])
@@ -1363,49 +1032,31 @@ with tab4:
     necessita_op = len(abertos[abertos['Acao_Necessaria'] == 'Necessario gerar OP'])
     erros = len(abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO'])
 
-    # KPIs como botoes clicaveis
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    with c1:
-        if st.button(f"✅ {com_estoque}\nCom Estoque", key="kpi_com_est", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'SIM')
-    with c2:
-        if st.button(f"⚠️ {parcial_est}\nEstoque Parcial", key="kpi_parcial_est", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'PARCIAL')
-    with c3:
-        if st.button(f"🔴 {sem_estoque}\nSem Estoque", key="kpi_sem_est", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Disponivel_Estoque', 'NAO')
-    with c4:
-        if st.button(f"📋 {necessita_sc}\nNecessitam SC", key="kpi_nec_sc", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'Necessario gerar SC')
-    with c5:
-        if st.button(f"🏭 {necessita_op}\nNecessitam OP", key="kpi_nec_op", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'Necessario gerar OP')
-    with c6:
-        if st.button(f"❌ {erros}\nERROS Cadastro", key="kpi_erros_t4", use_container_width=True):
-            st.session_state['tab4_filtro'] = ('Acao_Necessaria', 'ERRO no CADASTRO')
+    c1.markdown(kpi_card(f"{com_estoque}", "Com Estoque", "ok"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{parcial_est}", "Estoque Parcial", "warn"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"{sem_estoque}", "Sem Estoque", "alert"), unsafe_allow_html=True)
+    c4.markdown(kpi_card(f"{necessita_sc}", "Necessitam SC", "alert" if necessita_sc > 0 else "ok"), unsafe_allow_html=True)
+    c5.markdown(kpi_card(f"{necessita_op}", "Necessitam OP", "alert" if necessita_op > 0 else "ok"), unsafe_allow_html=True)
+    c6.markdown(kpi_card(f"{erros}", "ERROS Cadastro", "alert" if erros > 0 else "ok"), unsafe_allow_html=True)
 
     st.markdown("")
 
     col1, col2 = st.columns(2)
 
-    filtro_est_sel = []
-    filtro_acao_sel = []
-
     with col1:
         if len(abertos) > 0:
             est_count = abertos['Disponivel_Estoque'].value_counts().reset_index()
             est_count.columns = ['Disponibilidade', 'Qtd']
-            cores_est = {'SIM': CORES['verde'], 'NAO': CORES['vermelho'], 'PARCIAL': CORES['amarelo'], 'Serviço': CORES['amarelo']}
+            cores_est = {'SIM': CORES['verde'], 'NAO': CORES['vermelho'], 'PARCIAL': CORES['amarelo']}
             fig = px.pie(est_count, values='Qtd', names='Disponibilidade',
-                        title='Disponibilidade de Estoque (clique para filtrar)',
+                        title='Disponibilidade de Estoque',
                         color='Disponibilidade', color_discrete_map=cores_est, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=380
             )
-            evento_est = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"pie_estoque_t4_{_t4r}")
-            if evento_est and evento_est.selection and evento_est.selection.points:
-                filtro_est_sel = [p['label'] for p in evento_est.selection.points if 'label' in p]
+            st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         if len(abertos) > 0:
@@ -1418,58 +1069,28 @@ with tab4:
                 'SC gerada - Aguardando': CORES['amarelo'],
                 'OP gerada - Aguardando': '#F1C40F',
                 'ERRO no CADASTRO': CORES['vermelho_escuro'],
-                'Prazo a confirmar': CORES['amarelo'],
                 'Verificar classificacao': CORES['cinza']
             }
             fig2 = px.bar(acao_count, x='Acao', y='Qtd',
-                         title='Acoes Necessarias (clique para filtrar)',
+                         title='Acoes Necessarias',
                          color='Acao', color_discrete_map=cores_acao)
             fig2.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', height=380, showlegend=False,
                 xaxis_title='', yaxis_title='Quantidade'
             )
-            evento_acao = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_acao_t4_{_t4r}")
-            if evento_acao and evento_acao.selection and evento_acao.selection.points:
-                filtro_acao_sel = [p['x'] for p in evento_acao.selection.points if 'x' in p]
+            st.plotly_chart(fig2, use_container_width=True)
 
-    # Aplicar filtros: KPI button OU clique no grafico
-    tabela_t4 = abertos.copy()
-    filtro_info_t4 = []
+    # Tabela estoque
+    st.markdown("### 📋 Detalhe Estoque & SC/OP")
 
-    # Filtro via KPI button
-    kpi_filtro_t4 = st.session_state.get('tab4_filtro')
-    if kpi_filtro_t4:
-        campo, valor = kpi_filtro_t4
-        tabela_t4 = tabela_t4[tabela_t4[campo] == valor]
-        filtro_info_t4.append(f"{valor}")
-
-    # Filtro via clique no grafico (sobrepoe KPI)
-    if filtro_est_sel:
-        tabela_t4 = abertos[abertos['Disponivel_Estoque'].isin(filtro_est_sel)]
-        filtro_info_t4 = [f"Estoque: {', '.join(filtro_est_sel)}"]
-        st.session_state.pop('tab4_filtro', None)
-    if filtro_acao_sel:
-        tabela_t4 = tabela_t4[tabela_t4['Acao_Necessaria'].isin(filtro_acao_sel)]
-        filtro_info_t4.append(f"Acao: {', '.join(filtro_acao_sel)}")
-        st.session_state.pop('tab4_filtro', None)
-
-    if filtro_info_t4 or kpi_filtro_t4:
-        if st.button("🧹 Limpar filtros", key="limpar_t4"):
-            st.session_state.pop('tab4_filtro', None)
-            st.session_state['tab4_reset'] = _t4r + 1
-            st.rerun()
-
-    info_t4 = f" — Filtrado por: {' | '.join(filtro_info_t4)}" if filtro_info_t4 else ""
-    st.markdown(f"### 📋 Detalhe Estoque & SC/OP ({len(tabela_t4)} itens){info_t4}")
-
-    if len(tabela_t4) > 0:
+    if len(abertos) > 0:
         est_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
                    'Quantidade', 'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
                    'Acao_Necessaria', 'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'DT Emissao']
-        est_cols = [c for c in est_cols if c in tabela_t4.columns]
+        est_cols = [c for c in est_cols if c in abertos.columns]
 
-        est_df = tabela_t4[est_cols].copy().sort_values(['Produto', 'DT Emissao'])
+        est_df = abertos[est_cols].copy().sort_values(['Produto', 'DT Emissao'])
         rename_est = {
             'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
             'Tipo_Produto': 'Tipo', 'Quantidade': 'Qtd Pedida',
@@ -1483,7 +1104,6 @@ with tab4:
         def color_acao_tab(val):
             if val == 'ERRO no CADASTRO': return 'background-color: #C0392B; color: white; font-weight: bold'
             elif val == 'Estoque OK': return 'background-color: #1a3a1a; color: #2ECC71'
-            elif val == 'Prazo a confirmar': return 'background-color: #3a3a1a; color: #F39C12'
             elif 'Necessario' in str(val): return 'background-color: #3a1a1a; color: #E74C3C'
             elif 'gerada' in str(val): return 'background-color: #3a3a1a; color: #F39C12'
             return ''
@@ -1495,7 +1115,7 @@ with tab4:
         st.dataframe(styled, use_container_width=True, height=500)
 
     # Alertas de erro
-    erros_df = tabela_t4[tabela_t4['Acao_Necessaria'] == 'ERRO no CADASTRO'] if len(tabela_t4) > 0 else pd.DataFrame()
+    erros_df = abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO']
     if len(erros_df) > 0:
         st.markdown("### ⚠️ ERROS DE CADASTRO - Item Comprando com OP")
         st.error(f"Foram encontrados {len(erros_df)} itens classificados como 'Comprando' que possuem OP gerada. Verificar cadastro!")
@@ -1506,578 +1126,159 @@ with tab4:
 
 
 # ===== ABA 5: FATURAMENTO =====
-if tab5 is not None:
-    with tab5:
-        _t5r = st.session_state.get('tab5_reset', 0)
-        fat = fat_df.copy()
-        fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
-        fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto'), errors='coerce')
-        fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido'), errors='coerce')
-        fat['Margem Liquida (R$)'] = pd.to_numeric(fat.get('Margem Liquida (R$)'), errors='coerce')
-        fat['Margem Liquida (%)'] = pd.to_numeric(fat.get('Margem Liquida (%) por NF Faturada'), errors='coerce')
-        fat['Mes_Fat'] = fat['Emissao'].dt.to_period('M').astype(str)
+with tab5:
+    today_period = pd.Timestamp.now().normalize().to_period('M')
+    mes_atual_str = str(today_period)
 
-        # Aplicar filtros da sidebar ao faturamento
-        if vend_sel and 'Nome do Vendedor' in fat.columns:
-            fat = fat[fat['Nome do Vendedor'].isin(vend_sel)]
-        if ano_sel:
-            fat = fat[fat['Emissao'].dt.year.isin(ano_sel)]
+    if df_fat is not None and len(df_fat) > 0:
+        df_fat_f = filtro_data(df_fat, 'Emissao', 'Emissao NF', 'tab5')
 
-        fat_bruto = fat['Faturamento Bruto'].sum()
-        fat_liq = fat['Faturamento Liquido'].sum()
-        fat_margem_pct = fat['Margem Liquida (%)'].mean()
-        fat_nfs = fat['Num. Docto.'].nunique() if 'Num. Docto.' in fat.columns else 0
+        # --- KPIs de Faturamento ---
+        fat_total = df_fat_f['Vlr.Total.Fat'].sum()
+        fat_bruto = df_fat_f['Faturamento Bruto'].sum()
+        fat_liquido = df_fat_f['Faturamento Liquido'].sum()
+        fat_mes_atual = df_fat_f[df_fat_f['Mes_Faturamento'] == mes_atual_str]
+        fat_mes_valor = fat_mes_atual['Vlr.Total.Fat'].sum()
+        fat_mes_nfs = fat_mes_atual['Num. Docto.'].nunique() if 'Num. Docto.' in fat_mes_atual.columns else 0
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(kpi_card(f"R$ {fat_bruto:,.0f}", "Faturamento Bruto"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {fat_liq:,.0f}", "Faturamento Liquido", "ok"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"{fat_margem_pct:.1f}%", "Margem Liquida Media", "ok" if fat_margem_pct >= 30 else "warn"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"{fat_nfs}", "Notas Fiscais"), unsafe_allow_html=True)
+        # Valor a faturar no mes (pedidos abertos com previsao no mes)
+        abertos_prev = df[
+            (df['Status_Pedido'] == 'EM ABERTO') &
+            (df['Mes_Prev_Faturamento'] == mes_atual_str)
+        ]
+        valor_a_faturar = abertos_prev['Vlr.Total'].sum()
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(kpi_card(f"R$ {fat_mes_valor:,.0f}", f"Faturado {mes_atual_str}", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "A Faturar (Mes)", "warn"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {fat_mes_valor + valor_a_faturar:,.0f}", "Total Previsto Mes", "normal"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{fat_mes_nfs}", "NFs no Mes"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"R$ {fat_liquido:,.0f}", "Fat. Liquido Total"), unsafe_allow_html=True)
 
         st.markdown("")
 
         col1, col2 = st.columns(2)
 
-        filtro_mes_fat = []
-        filtro_vend_fat = []
-
         with col1:
-            fat_mes = fat.groupby('Mes_Fat').agg({'Faturamento Liquido': 'sum'}).reset_index()
-            fat_mes = fat_mes.sort_values('Mes_Fat')
-            fig = px.bar(fat_mes, x='Mes_Fat', y='Faturamento Liquido',
-                        title='Faturamento Liquido por Mes (clique para filtrar)',
-                        color_discrete_sequence=[CORES['verde']])
-            fig.update_layout(
+            # Faturamento mes a mes
+            fat_por_mes = df_fat_f.groupby('Mes_Faturamento').agg(
+                Valor=('Vlr.Total.Fat', 'sum'),
+                Fat_Bruto=('Faturamento Bruto', 'sum'),
+                Fat_Liquido=('Faturamento Liquido', 'sum'),
+            ).reset_index().sort_values('Mes_Faturamento')
+
+            fig_fat = px.bar(fat_por_mes, x='Mes_Faturamento', y='Valor',
+                            title='Faturamento Mes a Mes (Valor Total)',
+                            color_discrete_sequence=[CORES['verde']])
+            fig_fat.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
             )
-            evento_mes_fat = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key=f"bar_mes_fat_{_t5r}")
-            if evento_mes_fat and evento_mes_fat.selection and evento_mes_fat.selection.points:
-                filtro_mes_fat = [p['x'] for p in evento_mes_fat.selection.points if 'x' in p]
+            st.plotly_chart(fig_fat, use_container_width=True)
 
         with col2:
-            if 'Nome do Vendedor' in fat.columns:
-                fat_vend = fat.groupby('Nome do Vendedor').agg(
-                    {'Faturamento Liquido': 'sum'}
-                ).reset_index().sort_values('Faturamento Liquido', ascending=True).tail(10)
-                fig2 = px.bar(fat_vend, x='Faturamento Liquido', y='Nome do Vendedor',
-                             title='Top 10 Vendedores (clique para filtrar)',
-                             orientation='h', color_discrete_sequence=[CORES['azul_claro']])
-                fig2.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                    font_color='#E0E0E0', yaxis_title='', xaxis_title='R$', height=400
-                )
-                evento_vend = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key=f"bar_vend_fat_{_t5r}")
-                if evento_vend and evento_vend.selection and evento_vend.selection.points:
-                    filtro_vend_fat = [p['y'] for p in evento_vend.selection.points if 'y' in p]
+            # Faturado vs A Faturar no mes atual
+            fat_vs_data = pd.DataFrame({
+                'Categoria': ['Faturado', 'A Faturar'],
+                'Valor': [fat_mes_valor, valor_a_faturar]
+            })
+            fig_vs = px.pie(fat_vs_data, values='Valor', names='Categoria',
+                           title=f'Faturado vs A Faturar - {mes_atual_str}',
+                           color='Categoria',
+                           color_discrete_map={'Faturado': CORES['verde'], 'A Faturar': CORES['amarelo']},
+                           hole=0.4)
+            fig_vs.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', height=400
+            )
+            st.plotly_chart(fig_vs, use_container_width=True)
 
-        # Aplicar filtros
-        tabela_fat = fat.copy()
-        filtro_info_fat = []
+        # Tabela faturamento por mes
+        st.markdown("### 📋 Faturamento por Mes")
+        fat_por_mes_display = fat_por_mes.copy()
+        fat_por_mes_display.columns = ['Mes', 'Valor Total', 'Fat. Bruto', 'Fat. Liquido']
+        st.dataframe(fat_por_mes_display, use_container_width=True, height=400)
 
-        if filtro_vend_fat:
-            tabela_fat = tabela_fat[tabela_fat['Nome do Vendedor'].isin(filtro_vend_fat)]
-            filtro_info_fat.append(f"Vendedor: {', '.join(filtro_vend_fat)}")
-        if filtro_mes_fat:
-            tabela_fat = tabela_fat[tabela_fat['Mes_Fat'].isin(filtro_mes_fat)]
-            filtro_info_fat.append(f"Mes: {', '.join(filtro_mes_fat)}")
-
-        if filtro_info_fat:
-            # KPIs atualizados para o filtro
-            fat_bruto_f = tabela_fat['Faturamento Bruto'].sum()
-            fat_liq_f = tabela_fat['Faturamento Liquido'].sum()
-            fat_margem_f = tabela_fat['Margem Liquida (%)'].mean()
-            fat_nfs_f = tabela_fat['Num. Docto.'].nunique() if 'Num. Docto.' in tabela_fat.columns else 0
-
-            st.markdown("#### 📊 Resumo do filtro aplicado")
-            r1, r2, r3, r4 = st.columns(4)
-            r1.markdown(kpi_card(f"R$ {fat_bruto_f:,.0f}", "Fat. Bruto (filtrado)"), unsafe_allow_html=True)
-            r2.markdown(kpi_card(f"R$ {fat_liq_f:,.0f}", "Fat. Liquido (filtrado)", "ok"), unsafe_allow_html=True)
-            r3.markdown(kpi_card(f"{fat_margem_f:.1f}%" if pd.notna(fat_margem_f) else "N/A", "Margem Media (filtrado)", "ok" if pd.notna(fat_margem_f) and fat_margem_f >= 30 else "warn"), unsafe_allow_html=True)
-            r4.markdown(kpi_card(f"{fat_nfs_f}", "NFs (filtrado)"), unsafe_allow_html=True)
-
-            if st.button("🧹 Limpar filtros", key="limpar_t5"):
-                st.session_state['tab5_reset'] = _t5r + 1
-                st.rerun()
-
-        info_fat = f" — Filtrado por: {' | '.join(filtro_info_fat)}" if filtro_info_fat else ""
-        st.markdown(f"### 📋 Detalhe do Faturamento ({len(tabela_fat)} itens){info_fat}")
-
-        fat_display_cols = [c for c in ['Emissao', 'Num. Docto.', 'No do Pedido', 'Produto',
-            'Descricao Produto', 'Quantidade', 'Razao Social', 'Nome Fantasia', 'UF',
-            'Faturamento Bruto', 'Faturamento Liquido', 'Margem Liquida (R$)',
-            'Margem Liquida (%) por NF Faturada',
-            'Nome do Vendedor', 'Tipo Negocio'] if c in tabela_fat.columns]
-        fat_table = tabela_fat[fat_display_cols].copy().sort_values('Emissao', ascending=False)
-        fat_table = fat_table.rename(columns={'Margem Liquida (%) por NF Faturada': 'Margem Liquida (%)'})
-        st.dataframe(fat_table, use_container_width=True, height=500)
+        # Detalhe a faturar no mes atual
+        if len(abertos_prev) > 0:
+            st.markdown(f"### 📋 Detalhe - A Faturar em {mes_atual_str}")
+            cols_afat = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
+                        'Ped Cliente', 'Vlr.Total', 'FU_Dt_Chegada_Autron',
+                        'Pronto_para_Fazer', 'Acao_Necessaria']
+            cols_afat = [c for c in cols_afat if c in abertos_prev.columns]
+            st.dataframe(abertos_prev[cols_afat], use_container_width=True, height=300)
+    else:
+        st.warning("Arquivo faturamento.xlsx nao carregado. Envie o arquivo para ver esta aba.")
 
 
-# ===== ABA 6: PREVISAO DE FATURAMENTO =====
-if tab6 is not None:
-    with tab6:
-        st.markdown("### 📈 Previsao de Faturamento")
-        st.caption("Previsao baseada na data de Entrega dos pedidos em aberto. Valores liquidos (Valor Total - 17%).")
+# ===== ABA 6: PREVISAO FATURAMENTO =====
+with tab6:
+    filtered_t6 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab6')
+    abertos = filtered_t6[filtered_t6['Status_Pedido'] == 'EM ABERTO']
 
-        # --- Preparar dados de previsao ---
-        abertos_prev = filtered[filtered['Status_Pedido'] == 'EM ABERTO'].copy()
-        abertos_prev['Entrega'] = pd.to_datetime(abertos_prev['Entrega'], errors='coerce')
-        abertos_prev = abertos_prev[abertos_prev['Entrega'].notna() & abertos_prev['Vlr.Total'].notna()]
-        abertos_prev['Vlr_Liquido_Prev'] = abertos_prev['Vlr.Total'] * 0.83  # -17%
-        abertos_prev['Mes_Entrega'] = abertos_prev['Entrega'].dt.to_period('M').astype(str)
+    if len(abertos) > 0:
+        # Previsao de faturamento baseado em Dt Chegada Autron
+        prev_fat = abertos.groupby('Mes_Prev_Faturamento').agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Previsto=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Prev_Faturamento')
 
-        # Previsao mes a mes
-        prev_mes = abertos_prev.groupby('Mes_Entrega').agg(
-            Valor_Total=('Vlr.Total', 'sum'),
-            Valor_Previsto=('Vlr_Liquido_Prev', 'sum'),
-            Qtd_Pedidos=('Num. Pedido', 'nunique'),
-            Qtd_Itens=('Vlr_Liquido_Prev', 'count')
-        ).reset_index().sort_values('Mes_Entrega')
-
-        # --- Preparar faturamento real por mes ---
-        fat_prev = fat_df.copy()
-        fat_prev['Emissao'] = pd.to_datetime(fat_prev['Emissao'], errors='coerce')
-        fat_prev['Faturamento Liquido'] = pd.to_numeric(fat_prev.get('Faturamento Liquido'), errors='coerce')
-        fat_prev['Mes_Fat'] = fat_prev['Emissao'].dt.to_period('M').astype(str)
-        # Aplicar filtros da sidebar ao faturamento
-        if vend_sel and 'Nome do Vendedor' in fat_prev.columns:
-            fat_prev = fat_prev[fat_prev['Nome do Vendedor'].isin(vend_sel)]
-        if ano_sel:
-            fat_prev = fat_prev[fat_prev['Emissao'].dt.year.isin(ano_sel)]
-        fat_real_mes = fat_prev.groupby('Mes_Fat').agg(
-            Faturado_Real=('Faturamento Liquido', 'sum')
-        ).reset_index().rename(columns={'Mes_Fat': 'Mes'})
-
-        # Mes atual para definir corte passado/futuro
-        mes_atual = pd.Timestamp.now().to_period('M').strftime('%Y-%m')
-
-        # KPIs de previsao
-        prev_bruto_total = prev_mes['Valor_Total'].sum()
-        prev_liq_total = prev_mes['Valor_Previsto'].sum()
-        prev_liq_futuro = prev_mes[prev_mes['Mes_Entrega'] >= mes_atual]['Valor_Previsto'].sum()
-        prev_pvs = abertos_prev['Num. Pedido'].nunique()
+        # KPIs
+        com_previsao = abertos[abertos['Mes_Prev_Faturamento'] != 'Sem previsao']
+        sem_previsao = abertos[abertos['Mes_Prev_Faturamento'] == 'Sem previsao']
+        valor_com = com_previsao['Vlr.Total'].sum()
+        valor_sem = sem_previsao['Vlr.Total'].sum()
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(kpi_card(f"R$ {prev_bruto_total:,.0f}", "Previsao Total (Bruto)"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {prev_liq_total:,.0f}", "Previsao Total (Liq.)"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {prev_liq_futuro:,.0f}", "Previsao Meses Abertos (Liq.)", "ok"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"{prev_pvs}", "PVs com Entrega"), unsafe_allow_html=True)
+        c1.markdown(kpi_card(f"{len(com_previsao)}", "Com Previsao", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {valor_com:,.0f}", "Valor c/ Previsao", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{len(sem_previsao)}", "Sem Previsao", "alert"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {valor_sem:,.0f}", "Valor s/ Previsao", "warn"), unsafe_allow_html=True)
 
         st.markdown("")
 
-        # --- SECAO 1: Previsao de Entrega mes a mes ---
-        st.markdown("#### 📅 Previsao de Faturamento por Mes (base: Data Entrega)")
-        _t6r = st.session_state.get('tab6_reset', 0)
-        filtro_mes_prev = []
-
-        if len(prev_mes) > 0:
-            fig_prev = go.Figure()
-            fig_prev.add_trace(go.Bar(
-                x=prev_mes['Mes_Entrega'], y=prev_mes['Valor_Total'],
-                name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
-                text=prev_mes['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
-                textposition='outside'
-            ))
-            fig_prev.add_trace(go.Bar(
-                x=prev_mes['Mes_Entrega'], y=prev_mes['Valor_Previsto'],
-                name='Valor Liquido (-17%)', marker_color=CORES['verde'],
-                text=prev_mes['Valor_Previsto'].apply(lambda x: f'R$ {x:,.0f}'),
-                textposition='outside'
-            ))
+        # Grafico previsao
+        prev_graf = prev_fat[prev_fat['Mes_Prev_Faturamento'] != 'Sem previsao'].copy()
+        if len(prev_graf) > 0:
+            fig_prev = px.bar(prev_graf, x='Mes_Prev_Faturamento', y='Valor_Previsto',
+                             title='Previsao de Faturamento Mes a Mes (Dt Chegada Autron)',
+                             color_discrete_sequence=[CORES['azul_claro']],
+                             text='Qtd_PVs')
+            fig_prev.update_traces(texttemplate='%{text} PVs', textposition='outside')
             fig_prev.update_layout(
-                barmode='group',
-                title='Previsao de Faturamento por Mes de Entrega (Total x Liquido) - clique para filtrar',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='Mes de Entrega', yaxis_title='R$',
-                xaxis_type='category', height=450,
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
             )
-            evento_prev = st.plotly_chart(fig_prev, use_container_width=True, on_select="rerun", key=f"bar_prev_mes_{_t6r}")
-            if evento_prev and evento_prev.selection and evento_prev.selection.points:
-                filtro_mes_prev = list(set(p['x'] for p in evento_prev.selection.points if 'x' in p))
+            st.plotly_chart(fig_prev, use_container_width=True)
 
-            # Se clicou em um mes, mostrar filtro + detalhe dos pedidos logo abaixo do grafico
-            if filtro_mes_prev:
-                if st.button("🧹 Limpar filtros", key="limpar_t6"):
-                    st.session_state['tab6_reset'] = _t6r + 1
-                    st.rerun()
+        # Entrada de pedidos mes a mes
+        st.markdown("### 📋 Entrada de Pedidos Mes a Mes")
+        entrada_mes = filtered_t6.groupby('Mes_Emissao').agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Total=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Emissao')
+        entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
 
-                detalhe_prev = abertos_prev[abertos_prev['Mes_Entrega'].isin(filtro_mes_prev)]
-                info_prev = f"Filtrado por Mes: {', '.join(sorted(filtro_mes_prev))}"
-                st.markdown(f"#### 📋 Pedidos do Mes Selecionado ({len(detalhe_prev)} itens) — {info_prev}")
-
-                if len(detalhe_prev) > 0:
-                    prev_detail_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
-                                       'Produto', 'Descricao do Produto', 'Quantidade',
-                                       'Vlr.Total', 'Vlr_Liquido_Prev', 'Entrega', 'Mes_Entrega',
-                                       'Nome do Vendedor', 'Descr. Cond Pagto']
-                    prev_detail_cols = [c for c in prev_detail_cols if c in detalhe_prev.columns]
-                    prev_detail = detalhe_prev[prev_detail_cols].copy().sort_values('Entrega')
-                    prev_detail = prev_detail.rename(columns={
-                        'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-                        'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
-                        'Vlr_Liquido_Prev': 'Valor Liq. Previsto',
-                        'Mes_Entrega': 'Mes Entrega', 'Nome do Vendedor': 'Vendedor',
-                        'Descr. Cond Pagto': 'Cond. Pagamento'
-                    })
-                    st.dataframe(prev_detail, use_container_width=True, height=500)
-            else:
-                # Sem filtro: mostrar tabela resumo por mes
-                prev_display = prev_mes.copy()
-                prev_display.columns = ['Mes Entrega', 'Valor Total (Bruto)', 'Valor Previsto (Liq.)', 'Qtd PVs', 'Qtd Itens']
-                prev_display['Valor Total (Bruto)'] = prev_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
-                prev_display['Valor Previsto (Liq.)'] = prev_display['Valor Previsto (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
-                st.dataframe(prev_display, use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum pedido em aberto com data de entrega definida.")
-
-        st.markdown("---")
-
-        # --- SECAO 2: Faturado + Previsao consolidado ---
-        st.markdown("#### 💰 Faturamento Real + Previsao Consolidada")
-        st.caption("Meses passados: apenas faturamento real. Mes atual e futuros: faturamento real + previsao de entrega.")
-
-        # Montar tabela consolidada
-        prev_rename = prev_mes[['Mes_Entrega', 'Valor_Previsto']].rename(columns={'Mes_Entrega': 'Mes'})
-
-        # Unir todos os meses
-        all_meses = sorted(set(fat_real_mes['Mes'].tolist() + prev_rename['Mes'].tolist()))
-        consolidado = pd.DataFrame({'Mes': all_meses})
-        consolidado = consolidado.merge(fat_real_mes, on='Mes', how='left')
-        consolidado = consolidado.merge(prev_rename, on='Mes', how='left')
-        consolidado['Faturado_Real'] = consolidado['Faturado_Real'].fillna(0)
-        consolidado['Valor_Previsto'] = consolidado['Valor_Previsto'].fillna(0)
-
-        # Aplicar regra: meses passados so faturamento real, meses abertos/futuros soma
-        consolidado['Previsao_Aplicada'] = np.where(
-            consolidado['Mes'] >= mes_atual,
-            consolidado['Valor_Previsto'],
-            0
-        )
-        consolidado['Total_Consolidado'] = consolidado['Faturado_Real'] + consolidado['Previsao_Aplicada']
-
-        if len(consolidado) > 0:
-            # Grafico de barras empilhadas
-            fig_consol = go.Figure()
-            fig_consol.add_trace(go.Bar(
-                x=consolidado['Mes'], y=consolidado['Faturado_Real'],
-                name='Faturamento Real', marker_color=CORES['verde'],
-                text=consolidado['Faturado_Real'].apply(lambda x: f'R$ {x:,.0f}' if x > 0 else ''),
-                textposition='inside'
-            ))
-            fig_consol.add_trace(go.Bar(
-                x=consolidado['Mes'], y=consolidado['Previsao_Aplicada'],
-                name='Previsao Entrega (Liq.)', marker_color=CORES['azul_claro'],
-                text=consolidado['Previsao_Aplicada'].apply(lambda x: f'R$ {x:,.0f}' if x > 0 else ''),
-                textposition='inside'
-            ))
-            fig_consol.update_layout(
-                barmode='stack',
-                title='Faturamento Real + Previsao de Faturamento',
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_ent = px.bar(entrada_mes, x='Mes', y='Valor Total',
+                            title='Entrada de Pedidos - Valor por Mes (DT Emissao)',
+                            color_discrete_sequence=[CORES['azul_claro']],
+                            text='Qtd PVs')
+            fig_ent.update_traces(texttemplate='%{text} PVs', textposition='outside')
+            fig_ent.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
-                xaxis_type='category', height=450, legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
             )
-            st.plotly_chart(fig_consol, use_container_width=True)
+            st.plotly_chart(fig_ent, use_container_width=True)
+        with col2:
+            st.dataframe(entrada_mes, use_container_width=True, height=400)
 
-            # Tabela consolidada
-            consol_display = consolidado[['Mes', 'Faturado_Real', 'Previsao_Aplicada', 'Total_Consolidado']].copy()
-            consol_display.columns = ['Mes', 'Faturamento Real', 'Previsao Entrega (Liq.)', 'Total Consolidado']
-            for col in ['Faturamento Real', 'Previsao Entrega (Liq.)', 'Total Consolidado']:
-                consol_display[col] = consol_display[col].apply(lambda x: f'R$ {x:,.2f}')
-            st.dataframe(consol_display, use_container_width=True, hide_index=True)
-
-            # KPIs do consolidado
-            total_real = consolidado['Faturado_Real'].sum()
-            total_prev_futuro = consolidado['Previsao_Aplicada'].sum()
-            total_consol = consolidado['Total_Consolidado'].sum()
-
-            st.markdown("")
-            r1, r2, r3 = st.columns(3)
-            r1.markdown(kpi_card(f"R$ {total_real:,.0f}", "Total Faturado Real", "ok"), unsafe_allow_html=True)
-            r2.markdown(kpi_card(f"R$ {total_prev_futuro:,.0f}", "Previsao Meses Abertos/Futuros"), unsafe_allow_html=True)
-            r3.markdown(kpi_card(f"R$ {total_consol:,.0f}", "Total Consolidado", "ok"), unsafe_allow_html=True)
-
-
-# ===== ABA 7: AGENDA DE ENTREGAS =====
-if tab7 is not None:
-    with tab7:
-        st.markdown("### 📆 Agenda de Entregas")
-        st.caption("Visao dia a dia e semanal dos pedidos em aberto. Prioriza Data Confirmada (Follow-up), senao usa Data de Entrega (Pedido).")
-
-        agenda = filtered[filtered['Status_Pedido'] == 'EM ABERTO'].copy()
-        agenda['Entrega'] = pd.to_datetime(agenda['Entrega'], errors='coerce')
-        agenda['FU_Dt_Confirma'] = pd.to_datetime(agenda['FU_Dt_Confirma'], errors='coerce')
-
-        # Data prevista: prioriza confirmada do follow-up, senao usa entrega do pedido
-        agenda['Data_Prevista'] = agenda['FU_Dt_Confirma'].combine_first(agenda['Entrega'])
-        agenda['Origem_Data'] = np.where(
-            agenda['FU_Dt_Confirma'].notna(), 'Confirmada (Follow-up)',
-            np.where(agenda['Entrega'].notna(), 'Entrega (Pedido)', 'Sem data')
-        )
-        agenda = agenda[agenda['Data_Prevista'].notna()]
-        agenda['Vlr.Total'] = pd.to_numeric(agenda['Vlr.Total'], errors='coerce').fillna(0)
-        agenda['Vlr_Liquido'] = agenda['Vlr.Total'] * 0.83
-
-        if len(agenda) > 0:
-            today = pd.Timestamp.now().normalize()
-
-            # Campos auxiliares
-            agenda['Dia'] = agenda['Data_Prevista'].dt.date
-            agenda['Semana'] = agenda['Data_Prevista'].dt.isocalendar().week.astype(int)
-            agenda['Ano_Sem'] = agenda['Data_Prevista'].dt.strftime('%Y-S%W')
-            agenda['Semana_Label'] = agenda['Data_Prevista'].apply(
-                lambda d: f"{(d - pd.Timedelta(days=d.weekday())).strftime('%d/%m')} a {(d + pd.Timedelta(days=6 - d.weekday())).strftime('%d/%m')}"
-            )
-            agenda['Semana_Key'] = agenda['Data_Prevista'].apply(
-                lambda d: (d - pd.Timedelta(days=d.weekday())).strftime('%Y-%m-%d')
-            )
-            agenda['Semana_Display'] = agenda.apply(
-                lambda r: f"{r['Semana_Key']}|{r['Semana_Label']}", axis=1
-            )
-
-            # Pedidos da semana atual
-            inicio_semana = today - pd.Timedelta(days=today.weekday())
-            fim_semana = inicio_semana + pd.Timedelta(days=6)
-            semana_atual = agenda[(agenda['Data_Prevista'] >= inicio_semana) & (agenda['Data_Prevista'] <= fim_semana)]
-            proxima_semana = agenda[(agenda['Data_Prevista'] > fim_semana) & (agenda['Data_Prevista'] <= fim_semana + pd.Timedelta(days=7))]
-
-            # KPIs
-            total_agenda = len(agenda)
-            valor_semana = semana_atual['Vlr.Total'].sum()
-            valor_liq_semana = semana_atual['Vlr_Liquido'].sum()
-            qtd_semana = len(semana_atual)
-            qtd_prox = len(proxima_semana)
-
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.markdown(kpi_card(f"{total_agenda}", "Total Pedidos Agenda"), unsafe_allow_html=True)
-            c2.markdown(kpi_card(f"{qtd_semana}", "Esta Semana", "warn" if qtd_semana > 0 else "ok"), unsafe_allow_html=True)
-            c3.markdown(kpi_card(f"R$ {valor_semana:,.0f}", "Valor Semana (Bruto)"), unsafe_allow_html=True)
-            c4.markdown(kpi_card(f"R$ {valor_liq_semana:,.0f}", "Valor Semana (Liq.)", "ok"), unsafe_allow_html=True)
-            c5.markdown(kpi_card(f"{qtd_prox}", "Proxima Semana"), unsafe_allow_html=True)
-
-            st.markdown("")
-
-            # Colunas padrao para exibir pedidos
-            _agenda_det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
-                               'Produto', 'Descricao do Produto', 'Quantidade',
-                               'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
-                               'Entrega', 'FU_Dt_Confirma',
-                               'Nome do Vendedor', 'Descr. Cond Pagto']
-            _agenda_rename = {
-                'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-                'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
-                'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
-                'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
-                'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
-                'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
-            }
-
-            # --- Pedidos do Dia ---
-            pedidos_hoje = agenda[agenda['Data_Prevista'].dt.normalize() == today]
-            valor_hoje = pedidos_hoje['Vlr.Total'].sum()
-            valor_liq_hoje = pedidos_hoje['Vlr_Liquido'].sum()
-
-            st.markdown(f"#### 📌 Pedidos do Dia ({today.strftime('%d/%m/%Y')}) — {len(pedidos_hoje)} itens | Bruto: R$ {valor_hoje:,.0f} | Liq: R$ {valor_liq_hoje:,.0f}")
-            if len(pedidos_hoje) > 0:
-                cols_hoje = [c for c in _agenda_det_cols if c in pedidos_hoje.columns]
-                df_hoje = pedidos_hoje[cols_hoje].copy().sort_values('Data_Prevista')
-                df_hoje = df_hoje.rename(columns=_agenda_rename)
-                st.dataframe(df_hoje, use_container_width=True, height=min(300, 35 + len(df_hoje) * 35), hide_index=True)
-            else:
-                st.info("Nenhum pedido previsto para hoje.")
-
-            st.markdown("")
-
-            # --- Pedidos da Semana ---
-            valor_liq_sem = semana_atual['Vlr_Liquido'].sum()
-            st.markdown(f"#### 📋 Pedidos da Semana ({inicio_semana.strftime('%d/%m')} a {fim_semana.strftime('%d/%m')}) — {len(semana_atual)} itens | Bruto: R$ {valor_semana:,.0f} | Liq: R$ {valor_liq_sem:,.0f}")
-            if len(semana_atual) > 0:
-                cols_sem = [c for c in _agenda_det_cols if c in semana_atual.columns]
-                df_sem = semana_atual[cols_sem].copy().sort_values('Data_Prevista')
-                df_sem = df_sem.rename(columns=_agenda_rename)
-                st.dataframe(df_sem, use_container_width=True, height=min(500, 35 + len(df_sem) * 35), hide_index=True)
-            else:
-                st.info("Nenhum pedido previsto para esta semana.")
-
-            st.markdown("---")
-
-            # --- Visao por semana ---
-            st.markdown("#### 📊 Faturamento Previsto por Semana")
-            _t7r = st.session_state.get('tab7_reset', 0)
-            filtro_semana_agenda = []
-
-            sem_agg = agenda.groupby(['Semana_Key', 'Semana_Label']).agg(
-                Valor_Total=('Vlr.Total', 'sum'),
-                Valor_Liquido=('Vlr_Liquido', 'sum'),
-                Qtd_Itens=('Vlr.Total', 'count'),
-                Qtd_PVs=('Num. Pedido', 'nunique')
-            ).reset_index().sort_values('Semana_Key')
-            sem_agg['Semana_Exibicao'] = sem_agg['Semana_Label']
-
-            fig_sem = go.Figure()
-            fig_sem.add_trace(go.Bar(
-                x=sem_agg['Semana_Exibicao'], y=sem_agg['Valor_Total'],
-                name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
-                text=sem_agg['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
-                textposition='outside'
-            ))
-            fig_sem.add_trace(go.Bar(
-                x=sem_agg['Semana_Exibicao'], y=sem_agg['Valor_Liquido'],
-                name='Valor Liquido (-17%)', marker_color=CORES['verde'],
-                text=sem_agg['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
-                textposition='outside'
-            ))
-            fig_sem.update_layout(
-                barmode='group',
-                title='Faturamento Previsto por Semana de Entrega - clique para filtrar',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='Semana', yaxis_title='R$',
-                xaxis_type='category', height=450,
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
-            )
-            evento_sem = st.plotly_chart(fig_sem, use_container_width=True, on_select="rerun", key=f"bar_sem_agenda_{_t7r}")
-            if evento_sem and evento_sem.selection and evento_sem.selection.points:
-                filtro_semana_agenda = list(set(p['x'] for p in evento_sem.selection.points if 'x' in p))
-
-            # Se clicou em uma semana, mostrar detalhe dia a dia
-            if filtro_semana_agenda:
-                if st.button("🧹 Limpar filtros", key="limpar_t7"):
-                    st.session_state['tab7_reset'] = _t7r + 1
-                    st.rerun()
-
-                semana_labels_sel = filtro_semana_agenda
-                agenda_filtrada = agenda[agenda['Semana_Label'].isin(semana_labels_sel)]
-                st.markdown(f"#### 📋 Pedidos da Semana Selecionada ({len(agenda_filtrada)} itens)")
-
-                # Grafico dia a dia da semana
-                if len(agenda_filtrada) > 0:
-                    agenda_filtrada['Dia_Str'] = agenda_filtrada['Data_Prevista'].dt.strftime('%d/%m (%a)')
-                    dia_agg = agenda_filtrada.groupby('Dia_Str').agg(
-                        Valor_Total=('Vlr.Total', 'sum'),
-                        Valor_Liquido=('Vlr_Liquido', 'sum'),
-                        Qtd=('Vlr.Total', 'count')
-                    ).reset_index()
-
-                    fig_dia = go.Figure()
-                    fig_dia.add_trace(go.Bar(
-                        x=dia_agg['Dia_Str'], y=dia_agg['Valor_Total'],
-                        name='Valor Total', marker_color=CORES['azul_claro'],
-                        text=dia_agg['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
-                        textposition='outside'
-                    ))
-                    fig_dia.add_trace(go.Bar(
-                        x=dia_agg['Dia_Str'], y=dia_agg['Valor_Liquido'],
-                        name='Valor Liquido', marker_color=CORES['verde'],
-                        text=dia_agg['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
-                        textposition='outside'
-                    ))
-                    fig_dia.update_layout(
-                        barmode='group', title='Faturamento Previsto Dia a Dia',
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
-                        xaxis_type='category', height=350,
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
-                    )
-                    st.plotly_chart(fig_dia, use_container_width=True)
-
-                    # Tabela de pedidos
-                    det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
-                               'Produto', 'Descricao do Produto', 'Quantidade',
-                               'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
-                               'Entrega', 'FU_Dt_Confirma',
-                               'Nome do Vendedor', 'Descr. Cond Pagto']
-                    det_cols = [c for c in det_cols if c in agenda_filtrada.columns]
-                    det = agenda_filtrada[det_cols].copy().sort_values('Data_Prevista')
-                    det = det.rename(columns={
-                        'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-                        'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
-                        'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
-                        'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
-                        'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
-                        'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
-                    })
-                    st.dataframe(det, use_container_width=True, height=500)
-            else:
-                # Sem filtro: mostrar tabela resumo por semana
-                sem_display = sem_agg[['Semana_Exibicao', 'Valor_Total', 'Valor_Liquido', 'Qtd_PVs', 'Qtd_Itens']].copy()
-                sem_display.columns = ['Semana', 'Valor Total (Bruto)', 'Valor Liquido (Liq.)', 'Qtd PVs', 'Qtd Itens']
-                sem_display['Valor Total (Bruto)'] = sem_display['Valor Total (Bruto)'].apply(lambda x: f'R$ {x:,.2f}')
-                sem_display['Valor Liquido (Liq.)'] = sem_display['Valor Liquido (Liq.)'].apply(lambda x: f'R$ {x:,.2f}')
-                st.dataframe(sem_display, use_container_width=True, hide_index=True)
-
-            # --- Visao dia a dia com filtro de datas ---
-            st.markdown("---")
-            st.markdown("#### 📅 Visao Dia a Dia")
-
-            col_dt1, col_dt2, col_dt3 = st.columns([1, 1, 2])
-            with col_dt1:
-                data_inicio = st.date_input("Data Inicio", value=today.date(), key="agenda_dt_ini")
-            with col_dt2:
-                data_fim = st.date_input("Data Fim", value=(today + pd.Timedelta(days=30)).date(), key="agenda_dt_fim")
-
-            dt_ini = pd.Timestamp(data_inicio)
-            dt_fim = pd.Timestamp(data_fim)
-            agenda_periodo = agenda[(agenda['Data_Prevista'] >= dt_ini) & (agenda['Data_Prevista'] <= dt_fim)]
-
-            if len(agenda_periodo) > 0:
-                valor_periodo = agenda_periodo['Vlr.Total'].sum()
-                valor_liq_periodo = agenda_periodo['Vlr_Liquido'].sum()
-                qtd_periodo = len(agenda_periodo)
-                with col_dt3:
-                    st.markdown(f"**{qtd_periodo} itens** | Bruto: **R$ {valor_periodo:,.0f}** | Liquido: **R$ {valor_liq_periodo:,.0f}**")
-
-                periodo_dia = agenda_periodo.groupby('Dia').agg(
-                    Valor_Total=('Vlr.Total', 'sum'),
-                    Valor_Liquido=('Vlr_Liquido', 'sum'),
-                    Qtd=('Vlr.Total', 'count')
-                ).reset_index().sort_values('Dia')
-                periodo_dia['Dia_Label'] = periodo_dia['Dia'].apply(lambda d: d.strftime('%d/%m (%a)'))
-
-                fig_periodo = go.Figure()
-                fig_periodo.add_trace(go.Bar(
-                    x=periodo_dia['Dia_Label'], y=periodo_dia['Valor_Total'],
-                    name='Valor Total (Bruto)', marker_color=CORES['azul_claro'],
-                    text=periodo_dia['Valor_Total'].apply(lambda x: f'R$ {x:,.0f}'),
-                    textposition='outside'
-                ))
-                fig_periodo.add_trace(go.Bar(
-                    x=periodo_dia['Dia_Label'], y=periodo_dia['Valor_Liquido'],
-                    name='Valor Liquido (-17%)', marker_color=CORES['verde'],
-                    text=periodo_dia['Valor_Liquido'].apply(lambda x: f'R$ {x:,.0f}'),
-                    textposition='outside'
-                ))
-                fig_periodo.update_layout(
-                    barmode='group',
-                    title=f"Faturamento Previsto Dia a Dia ({data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')})",
-                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                    font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
-                    xaxis_type='category', height=420,
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
-                )
-                fig_periodo.update_xaxes(tickangle=-45)
-                st.plotly_chart(fig_periodo, use_container_width=True)
-
-                # Tabela de pedidos do periodo
-                st.markdown(f"##### 📋 Pedidos do Periodo ({len(agenda_periodo)} itens)")
-                det_cols = ['Num. Pedido', 'Item', 'Razao Social', 'Nome Fantasia',
-                           'Produto', 'Descricao do Produto', 'Quantidade',
-                           'Vlr.Total', 'Vlr_Liquido', 'Data_Prevista', 'Origem_Data',
-                           'Entrega', 'FU_Dt_Confirma',
-                           'Nome do Vendedor', 'Descr. Cond Pagto']
-                det_cols = [c for c in det_cols if c in agenda_periodo.columns]
-                det_periodo = agenda_periodo[det_cols].copy().sort_values('Data_Prevista')
-                det_periodo = det_periodo.rename(columns={
-                    'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
-                    'Quantidade': 'Qtd', 'Vlr.Total': 'Valor Total',
-                    'Vlr_Liquido': 'Valor Liq.', 'Data_Prevista': 'Data Prevista',
-                    'Origem_Data': 'Origem', 'Entrega': 'Dt. Entrega (Pedido)',
-                    'FU_Dt_Confirma': 'Dt. Confirmada (FU)',
-                    'Nome do Vendedor': 'Vendedor', 'Descr. Cond Pagto': 'Cond. Pagamento'
-                })
-                st.dataframe(det_periodo, use_container_width=True, height=500)
-            else:
-                st.info(f"Nenhum pedido previsto no periodo de {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}.")
-        else:
-            st.info("Nenhum pedido em aberto com data prevista de entrega.")
-
+        # Tabela previsao detalhada
+        st.markdown("### 📋 Previsao Detalhada")
+        prev_fat.columns = ['Mes Previsto', 'Qtd Linhas', 'Qtd PVs', 'Valor Previsto']
+        st.dataframe(prev_fat, use_container_width=True, height=300)
+    else:
+        st.info("Nenhum pedido em aberto com os filtros selecionados.")
