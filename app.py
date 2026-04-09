@@ -1313,6 +1313,11 @@ with tab6:
         meses_com_fat = sorted(df_fat['Mes_Faturamento'].dropna().unique())
         ultimo_mes_fechado = meses_com_fat[-1] if meses_com_fat else mes_atual_str
 
+        # Mes anterior ao atual (regra: primeiro bloco sempre mostra mes anterior)
+        mes_anterior = str((today_period - 1))
+        if mes_anterior not in quadro['Mes'].values:
+            mes_anterior = ultimo_mes_fechado
+
         # Faturamento LIQUIDO por mes (base do realizado)
         fat_liq_mes = df_fat.groupby('Mes_Faturamento').agg(
             Fat_Bruto=('Faturamento Bruto', 'sum'),
@@ -1362,11 +1367,11 @@ with tab6:
             (quadro['Total_Liquido'] / quadro['Receita_Liquida_Meta'] * 100), np.nan
         )
 
-        # --- KPIs do ultimo mes fechado ---
-        ult = quadro[quadro['Mes'] == ultimo_mes_fechado]
+        # --- KPIs do mes anterior (sempre o mes anterior ao atual) ---
+        ult = quadro[quadro['Mes'] == mes_anterior]
         if len(ult) > 0:
             ult = ult.iloc[0]
-            st.markdown(f"#### Resultado {ultimo_mes_fechado}")
+            st.markdown(f"#### Resultado {mes_anterior}")
             c1, c2, c3, c4 = st.columns(4)
             c1.markdown(kpi_card(f"R$ {ult['Receita_Liquida_Meta']:,.0f}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
             c2.markdown(kpi_card(f"R$ {ult['Fat_Liquido']:,.0f}", "Fat. Líquido",
