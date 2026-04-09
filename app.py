@@ -557,6 +557,7 @@ def carregar_e_processar():
         autron_idx = 0
 
         meta_faturamento = extrair_meta(autron_idx, 'Receita de vendas e Serviços')
+        meta_receita_liquida = extrair_meta(autron_idx, 'Receita líquida')
         meta_entrada = extrair_meta(autron_idx, 'Entrada de pedido')
 
         meses_str = []
@@ -569,6 +570,7 @@ def carregar_e_processar():
         budget = pd.DataFrame({
             'Mes': meses_str,
             'Meta_Faturamento': meta_faturamento,
+            'Meta_Receita_Liquida': meta_receita_liquida,
             'Meta_Entrada': meta_entrada,
         })
 
@@ -1268,202 +1270,196 @@ with tab6:
     mes_atual_str = str(today_period)
 
     if df_fat is not None and len(df_fat) > 0:
-        df_fat_f = filtro_data(df_fat, 'Emissao', 'Emissao NF', 'tab5')
+        df_fat_f = filtro_data(df_fat, 'Emissao', 'Emissao NF', 'tab6_fat')
 
-        # --- Determinar meses relevantes ---
-        # Ultimo mes com faturamento real (mes fechado)
+        # --- Dados base ---
         meses_com_fat = sorted(df_fat['Mes_Faturamento'].dropna().unique())
         ultimo_mes_fechado = meses_com_fat[-1] if meses_com_fat else mes_atual_str
 
-        # Realizado do mes atual (pode ser parcial se ja tem NFs em abril)
-        fat_mes_atual_data = df_fat[df_fat['Mes_Faturamento'] == mes_atual_str]
-        realizado_mes_atual = fat_mes_atual_data['Vlr.Total.Fat'].sum()
-
-        # Realizado do ultimo mes fechado
-        fat_ultimo_mes = df_fat[df_fat['Mes_Faturamento'] == ultimo_mes_fechado]
-        realizado_ultimo = fat_ultimo_mes['Vlr.Total.Fat'].sum()
-
-        # Se o mes atual tem dados, usar ele; senao, mostrar ultimo fechado
-        if realizado_mes_atual > 0:
-            mes_referencia = mes_atual_str
-            realizado_ref = realizado_mes_atual
-        else:
-            mes_referencia = ultimo_mes_fechado
-            realizado_ref = realizado_ultimo
-
-        # Projecao: pedidos abertos com Dt Chegada Autron no mes atual
-        abertos_prev = df[
-            (df['Status_Pedido'] == 'EM ABERTO') &
-            (df['Mes_Prev_Faturamento'] == mes_atual_str)
-        ]
-        valor_a_faturar = abertos_prev['Vlr.Total'].sum()
-
-        # Meta do mes atual e do mes de referencia (do budget)
-        meta_mes_atual = 0
-        meta_ref = 0
-        if df_budget is not None:
-            meta_row = df_budget[df_budget['Mes'] == mes_atual_str]
-            if len(meta_row) > 0:
-                meta_mes_atual = meta_row['Meta_Faturamento'].iloc[0]
-            meta_row_ref = df_budget[df_budget['Mes'] == mes_referencia]
-            if len(meta_row_ref) > 0:
-                meta_ref = meta_row_ref['Meta_Faturamento'].iloc[0]
-
-        # KPIs - Linha 1: Ultimo mes fechado
-        st.markdown(f"#### Resultado {ultimo_mes_fechado}")
-        c1, c2, c3, c4 = st.columns(4)
-        meta_ult = 0
-        if df_budget is not None:
-            meta_ult_row = df_budget[df_budget['Mes'] == ultimo_mes_fechado]
-            if len(meta_ult_row) > 0:
-                meta_ult = meta_ult_row['Meta_Faturamento'].iloc[0]
-        ating_ult = (realizado_ultimo / meta_ult * 100) if meta_ult > 0 else 0
-        c1.markdown(kpi_card(f"R$ {meta_ult:,.0f}", f"Meta {ultimo_mes_fechado}"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {realizado_ultimo:,.0f}", "Realizado", "ok" if realizado_ultimo >= meta_ult else "warn"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"{ating_ult:.1f}%", "Atingimento", "ok" if ating_ult >= 100 else ("warn" if ating_ult >= 80 else "alert")), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"R$ {realizado_ultimo - meta_ult:+,.0f}", "Diferenca", "ok" if realizado_ultimo >= meta_ult else "alert"), unsafe_allow_html=True)
-
-        # KPIs - Linha 2: Mes atual (projecao)
-        st.markdown(f"#### Projecao {mes_atual_str}")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card(f"R$ {meta_mes_atual:,.0f}", f"Meta {mes_atual_str}"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {realizado_mes_atual:,.0f}", "Realizado Parcial", "ok" if realizado_mes_atual > 0 else "normal"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "Projecao (A Faturar)", "warn"), unsafe_allow_html=True)
-        total_proj = realizado_mes_atual + valor_a_faturar
-        c4.markdown(kpi_card(f"R$ {total_proj:,.0f}", "Realizado + Projecao"), unsafe_allow_html=True)
-        ating_pct = (total_proj / meta_mes_atual * 100) if meta_mes_atual > 0 else 0
-        c5.markdown(kpi_card(f"{ating_pct:.1f}%", "Atingimento Previsto", "ok" if ating_pct >= 100 else ("warn" if ating_pct >= 80 else "alert")), unsafe_allow_html=True)
-
-        st.markdown("")
-
-        # ---- QUADRO META x REALIZADO x PROJECAO ----
-        st.markdown("### 📊 Meta x Realizado x Projecao")
-
-        # Faturamento realizado por mes
-        fat_por_mes = df_fat_f.groupby('Mes_Faturamento').agg(
-            Realizado=('Vlr.Total.Fat', 'sum'),
+        # Faturamento LIQUIDO por mes (base do realizado)
+        fat_liq_mes = df_fat.groupby('Mes_Faturamento').agg(
+            Fat_Bruto=('Faturamento Bruto', 'sum'),
+            Fat_Liquido=('Faturamento Liquido', 'sum'),
         ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
 
-        # Projecao por mes (pedidos em aberto com Dt Chegada Autron)
+        # Total a faturar por mes (pedidos em aberto com Dt Chegada Autron)
         abertos_all = df[df['Status_Pedido'] == 'EM ABERTO'].copy()
-        proj_mes = abertos_all[abertos_all['Mes_Prev_Faturamento'] != 'Sem previsao'].groupby(
+        a_faturar_mes = abertos_all[abertos_all['Mes_Prev_Faturamento'] != 'Sem previsao'].groupby(
             'Mes_Prev_Faturamento'
-        ).agg(Projecao=('Vlr.Total', 'sum')).reset_index().rename(
+        ).agg(Total_a_Faturar=('Vlr.Total', 'sum')).reset_index().rename(
             columns={'Mes_Prev_Faturamento': 'Mes'}
         )
 
-        # Montar tabela comparativa
-        if df_budget is not None:
-            comp = df_budget[['Mes', 'Meta_Faturamento']].copy()
-            comp.rename(columns={'Meta_Faturamento': 'Meta'}, inplace=True)
+        # Montar quadro consolidado 2026
+        if df_budget is not None and 'Meta_Receita_Liquida' in df_budget.columns:
+            quadro = df_budget[['Mes', 'Meta_Receita_Liquida']].copy()
+            quadro.rename(columns={'Meta_Receita_Liquida': 'Receita_Liquida_Meta'}, inplace=True)
         else:
-            # Sem budget, pegar meses do faturamento
-            all_meses = sorted(fat_por_mes['Mes'].unique())
-            comp = pd.DataFrame({'Mes': all_meses, 'Meta': 0})
+            quadro = pd.DataFrame({'Mes': [f'2026-{m:02d}' for m in range(1, 13)], 'Receita_Liquida_Meta': 0})
 
-        comp = comp.merge(fat_por_mes, on='Mes', how='outer')
-        comp = comp.merge(proj_mes, on='Mes', how='outer')
-        comp = comp.fillna(0).sort_values('Mes')
+        quadro = quadro.merge(fat_liq_mes, on='Mes', how='left')
+        quadro = quadro.merge(a_faturar_mes, on='Mes', how='left')
+        quadro = quadro.fillna(0).sort_values('Mes')
+        quadro = quadro[quadro['Mes'].str.startswith('2026')].copy()
 
-        # Filtrar apenas 2026
-        comp = comp[comp['Mes'].str.startswith('2026')].copy()
-
-        # Determinar meses fechados vs abertos
-        # Mes fechado = mes anterior ao atual (ja tem faturamento definitivo)
-        # Mes atual = realizado + projecao
-        # Meses futuros = somente projecao
-        comp['Status_Mes'] = comp['Mes'].apply(
+        # Status: fechado, atual, futuro
+        quadro['Status_Mes'] = quadro['Mes'].apply(
             lambda m: 'Fechado' if m < mes_atual_str else ('Atual' if m == mes_atual_str else 'Futuro')
         )
 
-        # Para meses fechados, projecao = 0 (ja realizado)
-        comp.loc[comp['Status_Mes'] == 'Fechado', 'Projecao'] = 0
+        # Para meses fechados, Total a faturar = 0 (ja realizado)
+        quadro.loc[quadro['Status_Mes'] == 'Fechado', 'Total_a_Faturar'] = 0
 
-        # Atingimento %
-        comp['Ating. %'] = np.where(
-            comp['Meta'] > 0,
-            ((comp['Realizado'] + comp['Projecao']) / comp['Meta'] * 100),
-            0
+        # Total líquido a faturar = Total a faturar - 17%
+        quadro['Total_Liq_a_Faturar'] = quadro['Total_a_Faturar'] * 0.83
+
+        # Total líquido = Fat. Líquido (realizado) + Total líq a faturar
+        quadro['Total_Liquido'] = quadro['Fat_Liquido'] + quadro['Total_Liq_a_Faturar']
+
+        # Realizado vs Meta
+        quadro['Diferenca_Meta'] = quadro['Total_Liquido'] - quadro['Receita_Liquida_Meta']
+        quadro['Ating_Pct'] = np.where(
+            quadro['Receita_Liquida_Meta'] > 0,
+            (quadro['Total_Liquido'] / quadro['Receita_Liquida_Meta'] * 100), 0
         )
 
-        col1, col2 = st.columns([2, 1])
+        # --- KPIs do ultimo mes fechado ---
+        ult = quadro[quadro['Mes'] == ultimo_mes_fechado]
+        if len(ult) > 0:
+            ult = ult.iloc[0]
+            st.markdown(f"#### Resultado {ultimo_mes_fechado}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.markdown(kpi_card(f"R$ {ult['Receita_Liquida_Meta']:,.0f}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {ult['Fat_Liquido']:,.0f}", "Fat. Líquido",
+                        "ok" if ult['Fat_Liquido'] >= ult['Receita_Liquida_Meta'] else "warn"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"{ult['Ating_Pct']:.0f}%", "Atingimento",
+                        "ok" if ult['Ating_Pct'] >= 100 else ("warn" if ult['Ating_Pct'] >= 80 else "alert")), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {ult['Diferenca_Meta']:+,.0f}", "Diferenca",
+                        "ok" if ult['Diferenca_Meta'] >= 0 else "alert"), unsafe_allow_html=True)
 
-        with col1:
-            # Grafico agrupado Meta x Realizado x Projecao
-            fig_comp = go.Figure()
-            fig_comp.add_trace(go.Bar(
-                x=comp['Mes'], y=comp['Meta'], name='Meta',
-                marker_color=CORES['azul_claro'], opacity=0.7
-            ))
-            fig_comp.add_trace(go.Bar(
-                x=comp['Mes'], y=comp['Realizado'], name='Realizado',
-                marker_color=CORES['verde']
-            ))
-            fig_comp.add_trace(go.Bar(
-                x=comp['Mes'], y=comp['Projecao'], name='Projecao',
-                marker_color=CORES['amarelo'], opacity=0.7
-            ))
-            fig_comp.update_layout(
-                barmode='group',
-                title='Meta x Realizado x Projecao - 2026',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450,
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
-            )
-            st.plotly_chart(fig_comp, use_container_width=True)
+        # --- Consolidado trimestral ---
+        quadro['Trimestre'] = quadro['Mes'].apply(
+            lambda m: f"Q{(int(m.split('-')[1]) - 1) // 3 + 1}"
+        )
+        tri_atual = f"Q{(today_period.month - 1) // 3 + 1}"
 
-        with col2:
-            # Tabela resumo
-            comp_display = comp[['Mes', 'Meta', 'Realizado', 'Projecao', 'Ating. %']].copy()
-            comp_display['Meta'] = comp_display['Meta'].apply(lambda x: f"R$ {x:,.0f}")
-            comp_display['Realizado'] = comp_display['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
-            comp_display['Projecao'] = comp_display['Projecao'].apply(lambda x: f"R$ {x:,.0f}")
-            comp_display['Ating. %'] = comp_display['Ating. %'].apply(lambda x: f"{x:.1f}%")
-            st.dataframe(comp_display, use_container_width=True, height=450)
+        # Ultimo trimestre com dados
+        tris_com_dados = quadro[quadro['Fat_Liquido'] > 0]['Trimestre'].unique()
+        tri_mostrar = sorted(tris_com_dados)[-1] if len(tris_com_dados) > 0 else 'Q1'
+
+        tri_data = quadro[quadro['Trimestre'] == tri_mostrar]
+        meta_tri = tri_data['Receita_Liquida_Meta'].sum()
+        fat_liq_tri = tri_data['Fat_Liquido'].sum()
+        total_liq_tri = tri_data['Total_Liquido'].sum()
+        diff_tri = total_liq_tri - meta_tri
+        ating_tri = (total_liq_tri / meta_tri * 100) if meta_tri > 0 else 0
+
+        st.markdown(f"#### Consolidado {tri_mostrar}")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(kpi_card(f"R$ {meta_tri:,.0f}", f"Meta {tri_mostrar}"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fat_liq_tri:,.0f}", "Fat. Líquido"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {total_liq_tri:,.0f}", f"Projecao {tri_mostrar}"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {diff_tri:+,.0f}", "Diferenca",
+                    "ok" if diff_tri >= 0 else "alert"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"{ating_tri:.0f}%", "Atingimento",
+                    "ok" if ating_tri >= 100 else ("warn" if ating_tri >= 80 else "alert")), unsafe_allow_html=True)
 
         st.markdown("")
 
+        # --- QUADRO PRINCIPAL (estilo planilha da Daniele) ---
+        st.markdown("### 📊 Quadro Faturamento - Meta x Realizado")
+
+        # Tabela transposta (meses como colunas)
+        meses_2026 = quadro['Mes'].tolist()
+        meses_labels = [m.replace('2026-', '') for m in meses_2026]
+
+        linhas = {
+            'Receita Líquida (Meta)': quadro['Receita_Liquida_Meta'].tolist(),
+            'Total a Faturar': quadro['Total_a_Faturar'].tolist(),
+            'Faturamento Líquido': quadro['Fat_Liquido'].tolist(),
+            'Total Líq. a Faturar (-17%)': quadro['Total_Liq_a_Faturar'].tolist(),
+            'Total Líquido': quadro['Total_Liquido'].tolist(),
+            'Realizado vs Meta': quadro['Diferenca_Meta'].tolist(),
+            'Atingimento %': quadro['Ating_Pct'].tolist(),
+        }
+
+        quadro_display = pd.DataFrame(linhas, index=meses_labels).T
+        quadro_display.index.name = 'Indicador'
+
+        # Formatar valores
+        quadro_fmt = quadro_display.copy()
+        for col in quadro_fmt.columns:
+            for idx in quadro_fmt.index:
+                val = quadro_fmt.at[idx, col]
+                if idx == 'Atingimento %':
+                    quadro_fmt.at[idx, col] = f"{val:.0f}%" if val != 0 else "-"
+                else:
+                    quadro_fmt.at[idx, col] = f"R$ {val:,.0f}" if val != 0 else "-"
+
+        st.dataframe(quadro_fmt, use_container_width=True, height=320)
+
+        st.markdown("")
+
+        # --- GRAFICOS ---
         col1, col2 = st.columns(2)
+
         with col1:
-            # Faturamento mes a mes (grafico original)
-            fat_por_mes_graf = df_fat_f.groupby('Mes_Faturamento').agg(
-                Valor=('Vlr.Total.Fat', 'sum'),
+            # Grafico barras: Fat. Bruto e Líquido mes a mes
+            fat_graf = df_fat_f.groupby('Mes_Faturamento').agg(
+                Bruto=('Faturamento Bruto', 'sum'),
+                Liquido=('Faturamento Liquido', 'sum'),
             ).reset_index().sort_values('Mes_Faturamento')
 
-            fig_fat = px.bar(fat_por_mes_graf, x='Mes_Faturamento', y='Valor',
-                            title='Faturamento Realizado Mes a Mes',
-                            color_discrete_sequence=[CORES['verde']])
+            fig_fat = go.Figure()
+            fig_fat.add_trace(go.Bar(
+                x=fat_graf['Mes_Faturamento'], y=fat_graf['Bruto'],
+                name='Bruto', marker_color=CORES['azul_claro'], opacity=0.7
+            ))
+            fig_fat.add_trace(go.Bar(
+                x=fat_graf['Mes_Faturamento'], y=fat_graf['Liquido'],
+                name='Líquido', marker_color=CORES['verde']
+            ))
             fig_fat.update_layout(
+                barmode='group',
+                title='Faturamento Bruto x Líquido - Mes a Mes',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
             )
             st.plotly_chart(fig_fat, use_container_width=True)
 
         with col2:
-            # Faturado vs A Faturar no mes atual
-            fat_vs_data = pd.DataFrame({
-                'Categoria': ['Faturado', 'A Faturar'],
-                'Valor': [realizado_mes_atual, valor_a_faturar]
-            })
-            fig_vs = px.pie(fat_vs_data, values='Valor', names='Categoria',
-                           title=f'Faturado vs A Faturar - {mes_atual_str}',
-                           color='Categoria',
-                           color_discrete_map={'Faturado': CORES['verde'], 'A Faturar': CORES['amarelo']},
-                           hole=0.4)
-            fig_vs.update_layout(
+            # Grafico Meta x Total Liquido 2026
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Bar(
+                x=quadro['Mes'], y=quadro['Receita_Liquida_Meta'],
+                name='Meta (Rec. Líquida)', marker_color=CORES['azul_claro'], opacity=0.7
+            ))
+            fig_comp.add_trace(go.Bar(
+                x=quadro['Mes'], y=quadro['Total_Liquido'],
+                name='Total Líquido', marker_color=CORES['verde']
+            ))
+            fig_comp.update_layout(
+                barmode='group',
+                title='Meta x Total Líquido - 2026',
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', height=400
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
             )
-            st.plotly_chart(fig_vs, use_container_width=True)
+            st.plotly_chart(fig_comp, use_container_width=True)
 
-        # Detalhe a faturar no mes atual
-        if len(abertos_prev) > 0:
+        # Detalhe a faturar
+        abertos_mes_atual = df[
+            (df['Status_Pedido'] == 'EM ABERTO') &
+            (df['Mes_Prev_Faturamento'] == mes_atual_str)
+        ]
+        if len(abertos_mes_atual) > 0:
             st.markdown(f"### 📋 Detalhe - A Faturar em {mes_atual_str}")
             cols_afat = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
                         'Ped Cliente', 'Vlr.Total', 'FU_Dt_Chegada_Autron',
                         'Pronto_para_Fazer', 'Acao_Necessaria']
-            cols_afat = [c for c in cols_afat if c in abertos_prev.columns]
-            st.dataframe(abertos_prev[cols_afat], use_container_width=True, height=300)
+            cols_afat = [c for c in cols_afat if c in abertos_mes_atual.columns]
+            st.dataframe(abertos_mes_atual[cols_afat], use_container_width=True, height=300)
     else:
         st.warning("Arquivo faturamento.xlsx nao carregado. Envie o arquivo para ver esta aba.")
 
