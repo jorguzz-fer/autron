@@ -1488,16 +1488,27 @@ with tab7:
     abertos = filtered_t7[filtered_t7['Status_Pedido'] == 'EM ABERTO']
 
     if len(abertos) > 0:
-        # Previsao de faturamento baseado em Dt Chegada Autron
-        prev_fat = abertos.groupby('Mes_Prev_Faturamento').agg(
+        mes_atual_prev = str(pd.Timestamp.now().normalize().to_period('M'))
+
+        # Filtrar apenas do mes atual em diante (sem datas passadas)
+        prev_fat = abertos[
+            (abertos['Mes_Prev_Faturamento'] != 'Sem previsao') &
+            (abertos['Mes_Prev_Faturamento'] >= mes_atual_prev)
+        ].groupby('Mes_Prev_Faturamento').agg(
             Qtd_Linhas=('Vlr.Total', 'count'),
             Qtd_PVs=('Num. Pedido', 'nunique'),
             Valor_Previsto=('Vlr.Total', 'sum'),
         ).reset_index().sort_values('Mes_Prev_Faturamento')
 
         # KPIs
-        com_previsao = abertos[abertos['Mes_Prev_Faturamento'] != 'Sem previsao']
-        sem_previsao = abertos[abertos['Mes_Prev_Faturamento'] == 'Sem previsao']
+        com_previsao = abertos[
+            (abertos['Mes_Prev_Faturamento'] != 'Sem previsao') &
+            (abertos['Mes_Prev_Faturamento'] >= mes_atual_prev)
+        ]
+        sem_previsao = abertos[
+            (abertos['Mes_Prev_Faturamento'] == 'Sem previsao') |
+            (abertos['Mes_Prev_Faturamento'] < mes_atual_prev)
+        ]
         valor_com = com_previsao['Vlr.Total'].sum()
         valor_sem = sem_previsao['Vlr.Total'].sum()
 
@@ -1508,15 +1519,15 @@ with tab7:
         c4.markdown(kpi_card(f"R$ {valor_sem:,.0f}", "Valor s/ Previsao", "warn"), unsafe_allow_html=True)
 
         st.markdown("")
+        st.caption("Datas usadas: Dt Chegada Autron > Prazo Real Entrega > DT. Ofertada")
 
-        # Grafico previsao
-        prev_graf = prev_fat[prev_fat['Mes_Prev_Faturamento'] != 'Sem previsao'].copy()
-        if len(prev_graf) > 0:
-            fig_prev = px.bar(prev_graf, x='Mes_Prev_Faturamento', y='Valor_Previsto',
-                             title='Previsao de Faturamento Mes a Mes (Dt Chegada Autron)',
+        # Grafico previsao - com VALOR nas barras
+        if len(prev_fat) > 0:
+            fig_prev = px.bar(prev_fat, x='Mes_Prev_Faturamento', y='Valor_Previsto',
+                             title='Previsao de Faturamento Mes a Mes',
                              color_discrete_sequence=[CORES['azul_claro']],
-                             text='Qtd_PVs')
-            fig_prev.update_traces(texttemplate='%{text} PVs', textposition='outside')
+                             text='Valor_Previsto')
+            fig_prev.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
             fig_prev.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
@@ -1525,7 +1536,8 @@ with tab7:
 
         # Tabela previsao detalhada
         st.markdown("### 📋 Previsao Detalhada")
-        prev_fat.columns = ['Mes Previsto', 'Qtd Linhas', 'Qtd PVs', 'Valor Previsto']
-        st.dataframe(prev_fat, use_container_width=True, height=300)
+        prev_display = prev_fat.copy()
+        prev_display.columns = ['Mes Previsto', 'Qtd Linhas', 'Qtd PVs', 'Valor Previsto']
+        st.dataframe(prev_display, use_container_width=True, height=300)
     else:
         st.info("Nenhum pedido em aberto com os filtros selecionados.")
