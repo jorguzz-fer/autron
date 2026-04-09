@@ -304,6 +304,7 @@ def carregar_e_processar():
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
     arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
     arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
+    arq_budget = os.path.join(DATA_DIR, "Metas_Budget_Grupo_Autron_2026.xlsx")
     # Aceitar ambos os nomes do CSV
     arq_sciozmq = os.path.join(DATA_DIR, "sciozvs0.csv")
     if not os.path.exists(arq_sciozmq):
@@ -311,7 +312,7 @@ def carregar_e_processar():
 
     for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
         if not os.path.exists(arq):
-            return None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
+            return None, None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
 
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
@@ -532,7 +533,42 @@ def carregar_e_processar():
     merged['Mes_Prev_Faturamento'] = merged['FU_Dt_Chegada_Autron'].dt.to_period('M').astype(str)
     merged.loc[merged['FU_Dt_Chegada_Autron'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
 
-    return merged, fat, None
+    # Budget / Metas
+    budget = None
+    if os.path.exists(arq_budget):
+        raw = pd.read_excel(arq_budget, header=1)
+        meses_col = [c for c in raw.columns[2:14]]  # 12 meses (Jan-Dez)
+        labels = raw.iloc[:, 1].astype(str).str.strip()
+
+        def extrair_meta(secao_inicio, linha_label):
+            """Extrai valores mensais de uma linha dentro de uma secao."""
+            for i in range(secao_inicio, min(secao_inicio + 12, len(raw))):
+                lbl = str(labels.iloc[i]).strip()
+                if lbl == linha_label:
+                    vals = raw.iloc[i, 2:14].values
+                    return [float(v) if pd.notna(v) else 0 for v in vals]
+            return [0] * 12
+
+        # Secao AUTRON comeca na linha 0 (header=1 usa AUTRON como col name)
+        autron_idx = 0
+
+        meta_faturamento = extrair_meta(autron_idx, 'Receita de vendas e Serviços')
+        meta_entrada = extrair_meta(autron_idx, 'Entrada de pedido')
+
+        meses_str = []
+        for c in meses_col:
+            if hasattr(c, 'strftime'):
+                meses_str.append(pd.Timestamp(c).to_period('M').strftime('%Y-%m'))
+            else:
+                meses_str.append(str(c))
+
+        budget = pd.DataFrame({
+            'Mes': meses_str,
+            'Meta_Faturamento': meta_faturamento,
+            'Meta_Entrada': meta_entrada,
+        })
+
+    return merged, fat, budget, None
 
 
 # ========================================================================
@@ -540,7 +576,7 @@ def carregar_e_processar():
 # ========================================================================
 os.makedirs(DATA_DIR, exist_ok=True)
 ARQUIVOS_NECESSARIOS = ['entrada_pedido.xlsx', 'followup.xlsx', 'mata010.xlsx', 'sciozvs0.csv']
-ARQUIVOS_OPCIONAIS = ['faturamento.xlsx']
+ARQUIVOS_OPCIONAIS = ['faturamento.xlsx', 'Metas_Budget_Grupo_Autron_2026.xlsx']
 
 
 def verificar_arquivos():
@@ -655,7 +691,7 @@ if len(ausentes) > 0:
 # ========================================================================
 # CARREGAR DADOS
 # ========================================================================
-df, df_fat, erro = carregar_e_processar()
+df, df_fat, df_budget, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
@@ -1150,27 +1186,119 @@ with tab5:
         ]
         valor_a_faturar = abertos_prev['Vlr.Total'].sum()
 
+        # Meta do mes atual (do budget)
+        meta_mes_atual = 0
+        if df_budget is not None:
+            meta_row = df_budget[df_budget['Mes'] == mes_atual_str]
+            if len(meta_row) > 0:
+                meta_mes_atual = meta_row['Meta_Faturamento'].iloc[0]
+
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card(f"R$ {fat_mes_valor:,.0f}", f"Faturado {mes_atual_str}", "ok"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "A Faturar (Mes)", "warn"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {fat_mes_valor + valor_a_faturar:,.0f}", "Total Previsto Mes", "normal"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"{fat_mes_nfs}", "NFs no Mes"), unsafe_allow_html=True)
-        c5.markdown(kpi_card(f"R$ {fat_liquido:,.0f}", "Fat. Liquido Total"), unsafe_allow_html=True)
+        c1.markdown(kpi_card(f"R$ {meta_mes_atual:,.0f}", f"Meta {mes_atual_str}"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fat_mes_valor:,.0f}", f"Realizado", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "Projecao (A Faturar)", "warn"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {fat_mes_valor + valor_a_faturar:,.0f}", "Realizado + Projecao"), unsafe_allow_html=True)
+        ating_pct = ((fat_mes_valor + valor_a_faturar) / meta_mes_atual * 100) if meta_mes_atual > 0 else 0
+        c5.markdown(kpi_card(f"{ating_pct:.1f}%", "Atingimento Meta", "ok" if ating_pct >= 100 else ("warn" if ating_pct >= 80 else "alert")), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        # ---- QUADRO META x REALIZADO x PROJECAO ----
+        st.markdown("### 📊 Meta x Realizado x Projecao")
+
+        # Faturamento realizado por mes
+        fat_por_mes = df_fat_f.groupby('Mes_Faturamento').agg(
+            Realizado=('Vlr.Total.Fat', 'sum'),
+        ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
+
+        # Projecao por mes (pedidos em aberto com Dt Chegada Autron)
+        abertos_all = df[df['Status_Pedido'] == 'EM ABERTO'].copy()
+        proj_mes = abertos_all[abertos_all['Mes_Prev_Faturamento'] != 'Sem previsao'].groupby(
+            'Mes_Prev_Faturamento'
+        ).agg(Projecao=('Vlr.Total', 'sum')).reset_index().rename(
+            columns={'Mes_Prev_Faturamento': 'Mes'}
+        )
+
+        # Montar tabela comparativa
+        if df_budget is not None:
+            comp = df_budget[['Mes', 'Meta_Faturamento']].copy()
+            comp.rename(columns={'Meta_Faturamento': 'Meta'}, inplace=True)
+        else:
+            # Sem budget, pegar meses do faturamento
+            all_meses = sorted(fat_por_mes['Mes'].unique())
+            comp = pd.DataFrame({'Mes': all_meses, 'Meta': 0})
+
+        comp = comp.merge(fat_por_mes, on='Mes', how='outer')
+        comp = comp.merge(proj_mes, on='Mes', how='outer')
+        comp = comp.fillna(0).sort_values('Mes')
+
+        # Filtrar apenas 2026
+        comp = comp[comp['Mes'].str.startswith('2026')].copy()
+
+        # Determinar meses fechados vs abertos
+        # Mes fechado = mes anterior ao atual (ja tem faturamento definitivo)
+        # Mes atual = realizado + projecao
+        # Meses futuros = somente projecao
+        comp['Status_Mes'] = comp['Mes'].apply(
+            lambda m: 'Fechado' if m < mes_atual_str else ('Atual' if m == mes_atual_str else 'Futuro')
+        )
+
+        # Para meses fechados, projecao = 0 (ja realizado)
+        comp.loc[comp['Status_Mes'] == 'Fechado', 'Projecao'] = 0
+
+        # Atingimento %
+        comp['Ating. %'] = np.where(
+            comp['Meta'] > 0,
+            ((comp['Realizado'] + comp['Projecao']) / comp['Meta'] * 100),
+            0
+        )
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            # Grafico agrupado Meta x Realizado x Projecao
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Bar(
+                x=comp['Mes'], y=comp['Meta'], name='Meta',
+                marker_color=CORES['azul_claro'], opacity=0.7
+            ))
+            fig_comp.add_trace(go.Bar(
+                x=comp['Mes'], y=comp['Realizado'], name='Realizado',
+                marker_color=CORES['verde']
+            ))
+            fig_comp.add_trace(go.Bar(
+                x=comp['Mes'], y=comp['Projecao'], name='Projecao',
+                marker_color=CORES['amarelo'], opacity=0.7
+            ))
+            fig_comp.update_layout(
+                barmode='group',
+                title='Meta x Realizado x Projecao - 2026',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        with col2:
+            # Tabela resumo
+            comp_display = comp[['Mes', 'Meta', 'Realizado', 'Projecao', 'Ating. %']].copy()
+            comp_display['Meta'] = comp_display['Meta'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_display['Realizado'] = comp_display['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_display['Projecao'] = comp_display['Projecao'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_display['Ating. %'] = comp_display['Ating. %'].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(comp_display, use_container_width=True, height=450)
 
         st.markdown("")
 
         col1, col2 = st.columns(2)
-
         with col1:
-            # Faturamento mes a mes
-            fat_por_mes = df_fat_f.groupby('Mes_Faturamento').agg(
+            # Faturamento mes a mes (grafico original)
+            fat_por_mes_graf = df_fat_f.groupby('Mes_Faturamento').agg(
                 Valor=('Vlr.Total.Fat', 'sum'),
-                Fat_Bruto=('Faturamento Bruto', 'sum'),
-                Fat_Liquido=('Faturamento Liquido', 'sum'),
             ).reset_index().sort_values('Mes_Faturamento')
 
-            fig_fat = px.bar(fat_por_mes, x='Mes_Faturamento', y='Valor',
-                            title='Faturamento Mes a Mes (Valor Total)',
+            fig_fat = px.bar(fat_por_mes_graf, x='Mes_Faturamento', y='Valor',
+                            title='Faturamento Realizado Mes a Mes',
                             color_discrete_sequence=[CORES['verde']])
             fig_fat.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -1194,12 +1322,6 @@ with tab5:
                 font_color='#E0E0E0', height=400
             )
             st.plotly_chart(fig_vs, use_container_width=True)
-
-        # Tabela faturamento por mes
-        st.markdown("### 📋 Faturamento por Mes")
-        fat_por_mes_display = fat_por_mes.copy()
-        fat_por_mes_display.columns = ['Mes', 'Valor Total', 'Fat. Bruto', 'Fat. Liquido']
-        st.dataframe(fat_por_mes_display, use_container_width=True, height=400)
 
         # Detalhe a faturar no mes atual
         if len(abertos_prev) > 0:
