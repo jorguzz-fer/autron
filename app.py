@@ -1175,35 +1175,69 @@ with tab5:
     if df_fat is not None and len(df_fat) > 0:
         df_fat_f = filtro_data(df_fat, 'Emissao', 'Emissao NF', 'tab5')
 
-        # --- KPIs de Faturamento ---
-        fat_total = df_fat_f['Vlr.Total.Fat'].sum()
-        fat_bruto = df_fat_f['Faturamento Bruto'].sum()
-        fat_liquido = df_fat_f['Faturamento Liquido'].sum()
-        fat_mes_atual = df_fat_f[df_fat_f['Mes_Faturamento'] == mes_atual_str]
-        fat_mes_valor = fat_mes_atual['Vlr.Total.Fat'].sum()
-        fat_mes_nfs = fat_mes_atual['Num. Docto.'].nunique() if 'Num. Docto.' in fat_mes_atual.columns else 0
+        # --- Determinar meses relevantes ---
+        # Ultimo mes com faturamento real (mes fechado)
+        meses_com_fat = sorted(df_fat['Mes_Faturamento'].dropna().unique())
+        ultimo_mes_fechado = meses_com_fat[-1] if meses_com_fat else mes_atual_str
 
-        # Valor a faturar no mes (pedidos abertos com previsao no mes)
+        # Realizado do mes atual (pode ser parcial se ja tem NFs em abril)
+        fat_mes_atual_data = df_fat[df_fat['Mes_Faturamento'] == mes_atual_str]
+        realizado_mes_atual = fat_mes_atual_data['Vlr.Total.Fat'].sum()
+
+        # Realizado do ultimo mes fechado
+        fat_ultimo_mes = df_fat[df_fat['Mes_Faturamento'] == ultimo_mes_fechado]
+        realizado_ultimo = fat_ultimo_mes['Vlr.Total.Fat'].sum()
+
+        # Se o mes atual tem dados, usar ele; senao, mostrar ultimo fechado
+        if realizado_mes_atual > 0:
+            mes_referencia = mes_atual_str
+            realizado_ref = realizado_mes_atual
+        else:
+            mes_referencia = ultimo_mes_fechado
+            realizado_ref = realizado_ultimo
+
+        # Projecao: pedidos abertos com Dt Chegada Autron no mes atual
         abertos_prev = df[
             (df['Status_Pedido'] == 'EM ABERTO') &
             (df['Mes_Prev_Faturamento'] == mes_atual_str)
         ]
         valor_a_faturar = abertos_prev['Vlr.Total'].sum()
 
-        # Meta do mes atual (do budget)
+        # Meta do mes atual e do mes de referencia (do budget)
         meta_mes_atual = 0
+        meta_ref = 0
         if df_budget is not None:
             meta_row = df_budget[df_budget['Mes'] == mes_atual_str]
             if len(meta_row) > 0:
                 meta_mes_atual = meta_row['Meta_Faturamento'].iloc[0]
+            meta_row_ref = df_budget[df_budget['Mes'] == mes_referencia]
+            if len(meta_row_ref) > 0:
+                meta_ref = meta_row_ref['Meta_Faturamento'].iloc[0]
 
+        # KPIs - Linha 1: Ultimo mes fechado
+        st.markdown(f"#### Resultado {ultimo_mes_fechado}")
+        c1, c2, c3, c4 = st.columns(4)
+        meta_ult = 0
+        if df_budget is not None:
+            meta_ult_row = df_budget[df_budget['Mes'] == ultimo_mes_fechado]
+            if len(meta_ult_row) > 0:
+                meta_ult = meta_ult_row['Meta_Faturamento'].iloc[0]
+        ating_ult = (realizado_ultimo / meta_ult * 100) if meta_ult > 0 else 0
+        c1.markdown(kpi_card(f"R$ {meta_ult:,.0f}", f"Meta {ultimo_mes_fechado}"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {realizado_ultimo:,.0f}", "Realizado", "ok" if realizado_ultimo >= meta_ult else "warn"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{ating_ult:.1f}%", "Atingimento", "ok" if ating_ult >= 100 else ("warn" if ating_ult >= 80 else "alert")), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {realizado_ultimo - meta_ult:+,.0f}", "Diferenca", "ok" if realizado_ultimo >= meta_ult else "alert"), unsafe_allow_html=True)
+
+        # KPIs - Linha 2: Mes atual (projecao)
+        st.markdown(f"#### Projecao {mes_atual_str}")
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(kpi_card(f"R$ {meta_mes_atual:,.0f}", f"Meta {mes_atual_str}"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {fat_mes_valor:,.0f}", f"Realizado", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {realizado_mes_atual:,.0f}", "Realizado Parcial", "ok" if realizado_mes_atual > 0 else "normal"), unsafe_allow_html=True)
         c3.markdown(kpi_card(f"R$ {valor_a_faturar:,.0f}", "Projecao (A Faturar)", "warn"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"R$ {fat_mes_valor + valor_a_faturar:,.0f}", "Realizado + Projecao"), unsafe_allow_html=True)
-        ating_pct = ((fat_mes_valor + valor_a_faturar) / meta_mes_atual * 100) if meta_mes_atual > 0 else 0
-        c5.markdown(kpi_card(f"{ating_pct:.1f}%", "Atingimento Meta", "ok" if ating_pct >= 100 else ("warn" if ating_pct >= 80 else "alert")), unsafe_allow_html=True)
+        total_proj = realizado_mes_atual + valor_a_faturar
+        c4.markdown(kpi_card(f"R$ {total_proj:,.0f}", "Realizado + Projecao"), unsafe_allow_html=True)
+        ating_pct = (total_proj / meta_mes_atual * 100) if meta_mes_atual > 0 else 0
+        c5.markdown(kpi_card(f"{ating_pct:.1f}%", "Atingimento Previsto", "ok" if ating_pct >= 100 else ("warn" if ating_pct >= 80 else "alert")), unsafe_allow_html=True)
 
         st.markdown("")
 
