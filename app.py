@@ -1417,53 +1417,68 @@ with tab6:
 
         st.markdown("")
 
-        # --- GRAFICOS ---
-        col1, col2 = st.columns(2)
+        # --- GRAFICO FATURAMENTO: Meta x Realizado x Previsao ---
+        # Realizado (Fat. Bruto) por mes - apenas 2026
+        fat_real_2026 = df_fat.groupby('Mes_Faturamento').agg(
+            Realizado=('Faturamento Bruto', 'sum'),
+        ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
+        fat_real_2026 = fat_real_2026[fat_real_2026['Mes'].str.startswith('2026')]
 
-        with col1:
-            # Grafico barras: Fat. Bruto e Líquido mes a mes
-            fat_graf = df_fat_f.groupby('Mes_Faturamento').agg(
-                Bruto=('Faturamento Bruto', 'sum'),
-                Liquido=('Faturamento Liquido', 'sum'),
-            ).reset_index().sort_values('Mes_Faturamento')
+        # Previsao (Total a faturar) por mes - apenas do mes atual em diante
+        prev_2026 = a_faturar_mes[a_faturar_mes['Mes'].str.startswith('2026')].copy()
+        prev_2026 = prev_2026[prev_2026['Mes'] >= mes_atual_str]
 
-            fig_fat = go.Figure()
-            fig_fat.add_trace(go.Bar(
-                x=fat_graf['Mes_Faturamento'], y=fat_graf['Bruto'],
-                name='Bruto', marker_color=CORES['azul_claro'], opacity=0.7
-            ))
-            fig_fat.add_trace(go.Bar(
-                x=fat_graf['Mes_Faturamento'], y=fat_graf['Liquido'],
-                name='Líquido', marker_color=CORES['verde']
-            ))
-            fig_fat.update_layout(
-                barmode='group',
-                title='Faturamento Bruto x Líquido - Mes a Mes',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
-            )
-            st.plotly_chart(fig_fat, use_container_width=True)
+        # Montar grafico com os 12 meses
+        graf = quadro[['Mes', 'Receita_Liquida_Meta']].copy()
+        graf.rename(columns={'Receita_Liquida_Meta': 'Meta'}, inplace=True)
+        graf = graf.merge(fat_real_2026, on='Mes', how='left')
+        graf = graf.merge(prev_2026, on='Mes', how='left')
+        graf = graf.fillna(0)
 
-        with col2:
-            # Grafico Meta x Total Liquido 2026
-            fig_comp = go.Figure()
-            fig_comp.add_trace(go.Bar(
-                x=quadro['Mes'], y=quadro['Receita_Liquida_Meta'],
-                name='Meta (Rec. Líquida)', marker_color=CORES['azul_claro'], opacity=0.7
-            ))
-            fig_comp.add_trace(go.Bar(
-                x=quadro['Mes'], y=quadro['Total_Liquido'],
-                name='Total Líquido', marker_color=CORES['verde']
-            ))
-            fig_comp.update_layout(
-                barmode='group',
-                title='Meta x Total Líquido - 2026',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
-            )
-            st.plotly_chart(fig_comp, use_container_width=True)
+        # Labels no formato "jan-26"
+        meses_nomes = {
+            '01': 'jan', '02': 'fev', '03': 'mar', '04': 'abr',
+            '05': 'mai', '06': 'jun', '07': 'jul', '08': 'ago',
+            '09': 'set', '10': 'out', '11': 'nov', '12': 'dez'
+        }
+        graf['Label'] = graf['Mes'].apply(
+            lambda m: f"{meses_nomes.get(m.split('-')[1], m.split('-')[1])}-{m.split('-')[0][2:]}"
+        )
+
+        fig_fat = go.Figure()
+        # Meta (azul)
+        fig_fat.add_trace(go.Bar(
+            x=graf['Label'], y=graf['Meta'], name='Meta',
+            marker_color='#4472C4',
+            text=graf['Meta'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            textposition='outside', textfont=dict(size=10)
+        ))
+        # Realizado (laranja)
+        fig_fat.add_trace(go.Bar(
+            x=graf['Label'], y=graf['Realizado'], name='Realizado',
+            marker_color='#ED7D31',
+            text=graf['Realizado'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            textposition='outside', textfont=dict(size=10, color='#ED7D31')
+        ))
+        # Previsao (verde)
+        fig_fat.add_trace(go.Bar(
+            x=graf['Label'], y=graf['Total_a_Faturar'], name='Previsao',
+            marker_color='#70AD47',
+            text=graf['Total_a_Faturar'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            textposition='outside', textfont=dict(size=10, color='#70AD47')
+        ))
+
+        fig_fat.update_layout(
+            barmode='group',
+            title=dict(text='Faturamento', font=dict(size=20), x=0.5),
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#E0E0E0', xaxis_title='', yaxis_title='',
+            height=500,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+            yaxis=dict(showticklabels=False, showgrid=False),
+            margin=dict(t=80)
+        )
+        st.plotly_chart(fig_fat, use_container_width=True)
 
         # Detalhe a faturar (campo Entrega)
         abertos_mes_atual = df[
