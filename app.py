@@ -558,12 +558,22 @@ def carregar_e_processar():
                     return [float(v) if pd.notna(v) else 0 for v in vals]
             return [0] * 12
 
-        # Secao AUTRON comeca na linha 0 (header=1 usa AUTRON como col name)
+        # Secao AUTRON comeca na linha 0, GRUPO mais abaixo
         autron_idx = 0
+        grupo_idx = None
+        for i, l in enumerate(labels):
+            if str(l).upper() == 'GRUPO':
+                grupo_idx = i
+                break
 
         meta_faturamento = extrair_meta(autron_idx, 'Receita de vendas e Serviços')
-        meta_receita_liquida = extrair_meta(autron_idx, 'Receita líquida')
         meta_entrada = extrair_meta(autron_idx, 'Entrada de pedido')
+
+        # Meta Receita Liquida = GRUPO (nao AUTRON)
+        if grupo_idx is not None:
+            meta_receita_liquida = extrair_meta(grupo_idx, 'Receita líquida')
+        else:
+            meta_receita_liquida = extrair_meta(autron_idx, 'Receita líquida')
 
         meses_str = []
         for c in meses_col:
@@ -1424,16 +1434,15 @@ with tab6:
         ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
         fat_real_2026 = fat_real_2026[fat_real_2026['Mes'].str.startswith('2026')]
 
-        # Previsao (Total a faturar) por mes - apenas do mes atual em diante
-        prev_2026 = a_faturar_mes[a_faturar_mes['Mes'].str.startswith('2026')].copy()
-        prev_2026 = prev_2026[prev_2026['Mes'] >= mes_atual_str]
-
-        # Montar grafico com os 12 meses
-        graf = quadro[['Mes', 'Receita_Liquida_Meta']].copy()
+        # Montar grafico com os 12 meses usando dados do quadro
+        graf = quadro[['Mes', 'Receita_Liquida_Meta', 'Fat_Liquido', 'Total_Liquido', 'Status_Mes']].copy()
         graf.rename(columns={'Receita_Liquida_Meta': 'Meta'}, inplace=True)
         graf = graf.merge(fat_real_2026, on='Mes', how='left')
-        graf = graf.merge(prev_2026, on='Mes', how='left')
-        graf = graf.fillna(0)
+        graf['Realizado'] = graf['Realizado'].fillna(0)
+        # Previsao = Total Liquido para meses atuais/futuros com a faturar
+        graf['Previsao'] = np.where(
+            graf['Status_Mes'] != 'Fechado', graf['Total_Liquido'], 0
+        )
 
         # Labels no formato "jan-26"
         meses_nomes = {
@@ -1460,11 +1469,11 @@ with tab6:
             text=graf['Realizado'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
             textposition='outside', textfont=dict(size=10, color='#ED7D31')
         ))
-        # Previsao (verde)
+        # Previsao (verde) = Total Liquido para meses nao fechados
         fig_fat.add_trace(go.Bar(
-            x=graf['Label'], y=graf['Total_a_Faturar'], name='Previsao',
+            x=graf['Label'], y=graf['Previsao'], name='Previsao',
             marker_color='#70AD47',
-            text=graf['Total_a_Faturar'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            text=graf['Previsao'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
             textposition='outside', textfont=dict(size=10, color='#70AD47')
         ))
 
