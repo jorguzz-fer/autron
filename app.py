@@ -662,6 +662,11 @@ def tela_upload():
             type=['xlsx'], key='up_fat',
             help="Relatorio de faturamento (NFs emitidas)"
         )
+        up_budget = st.file_uploader(
+            "📊 Metas_Budget.xlsx",
+            type=['xlsx'], key='up_budget',
+            help="Metas e Budget do Grupo Autron 2026"
+        )
 
     uploads = {
         'entrada_pedido.xlsx': up_entrada,
@@ -669,6 +674,7 @@ def tela_upload():
         'mata010.xlsx': up_mata,
         'sciozvs0.csv': up_scio,
         'faturamento.xlsx': up_fat,
+        'Metas_Budget_Grupo_Autron_2026.xlsx': up_budget,
     }
 
     # Salvar arquivos enviados
