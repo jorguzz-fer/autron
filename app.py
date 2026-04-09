@@ -94,8 +94,9 @@ def tela_login():
 
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
-        st.markdown('<div class="login-logo">📦</div>', unsafe_allow_html=True)
-        st.markdown('<div class="login-title">Autron</div>', unsafe_allow_html=True)
+        logo_login = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        if os.path.exists(logo_login):
+            st.image(logo_login, width=220, use_container_width=False)
         st.markdown('<div class="login-subtitle">Dashboard de Pedidos</div>', unsafe_allow_html=True)
 
         with st.form("login_form"):
@@ -646,7 +647,7 @@ def tela_upload():
     """Exibe tela de upload dos arquivos."""
     st.markdown("""
     <div style="text-align: center; padding: 40px 0 20px 0;">
-        <h1 style="color: #4FC3F7;">📦 Dashboard de Pedidos</h1>
+        <h1 style="color: #4FC3F7;">Dashboard de Pedidos</h1>
         <p style="color: #B0BEC5; font-size: 1.1rem;">
             Envie os 4 relatorios para gerar o dashboard
         </p>
@@ -853,7 +854,10 @@ filtered = df[mask]
 # ========================================================================
 # HEADER
 # ========================================================================
-st.markdown("# 📦 Dashboard de Pedidos")
+logo_header = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+if os.path.exists(logo_header):
+    st.image(logo_header, width=180)
+st.markdown("# Dashboard de Pedidos")
 st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas de {len(df):,} | {filtered['Num. Pedido'].nunique()} PVs</p>", unsafe_allow_html=True)
 
 
