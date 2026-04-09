@@ -533,9 +533,15 @@ def carregar_e_processar():
         )
     )
 
-    # Mes previsto de faturamento (baseado em Dt Chegada Autron)
-    merged['Mes_Prev_Faturamento'] = merged['FU_Dt_Chegada_Autron'].dt.to_period('M').astype(str)
-    merged.loc[merged['FU_Dt_Chegada_Autron'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
+    # Mes previsto de faturamento: cascata de datas
+    # 1) FU_Dt_Chegada_Autron, 2) Prazo_Real_Entrega, 3) DT. Ofertada
+    merged['Data_Prev_Fat'] = merged['FU_Dt_Chegada_Autron'].combine_first(
+        merged['Prazo_Real_Entrega']
+    ).combine_first(
+        merged['DT. Ofertada']
+    )
+    merged['Mes_Prev_Faturamento'] = merged['Data_Prev_Fat'].dt.to_period('M').astype(str)
+    merged.loc[merged['Data_Prev_Fat'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
 
     # Budget / Metas
     budget = None
@@ -1316,11 +1322,13 @@ with tab6:
         # Total líquido = Fat. Líquido (realizado) + Total líq a faturar
         quadro['Total_Liquido'] = quadro['Fat_Liquido'] + quadro['Total_Liq_a_Faturar']
 
-        # Realizado vs Meta
-        quadro['Diferenca_Meta'] = quadro['Total_Liquido'] - quadro['Receita_Liquida_Meta']
+        # Realizado vs Meta (so para meses com dados)
+        tem_dados = (quadro['Fat_Liquido'] > 0) | (quadro['Total_a_Faturar'] > 0)
+        quadro['Diferenca_Meta'] = np.where(tem_dados,
+            quadro['Total_Liquido'] - quadro['Receita_Liquida_Meta'], np.nan)
         quadro['Ating_Pct'] = np.where(
-            quadro['Receita_Liquida_Meta'] > 0,
-            (quadro['Total_Liquido'] / quadro['Receita_Liquida_Meta'] * 100), 0
+            tem_dados & (quadro['Receita_Liquida_Meta'] > 0),
+            (quadro['Total_Liquido'] / quadro['Receita_Liquida_Meta'] * 100), np.nan
         )
 
         # --- KPIs do ultimo mes fechado ---
@@ -1391,10 +1399,14 @@ with tab6:
         for col in quadro_fmt.columns:
             for idx in quadro_fmt.index:
                 val = quadro_fmt.at[idx, col]
-                if idx == 'Atingimento %':
-                    quadro_fmt.at[idx, col] = f"{val:.0f}%" if val != 0 else "-"
+                if pd.isna(val):
+                    quadro_fmt.at[idx, col] = "-"
+                elif idx == 'Atingimento %':
+                    quadro_fmt.at[idx, col] = f"{val:.0f}%"
+                elif val == 0:
+                    quadro_fmt.at[idx, col] = "-"
                 else:
-                    quadro_fmt.at[idx, col] = f"R$ {val:,.0f}" if val != 0 else "-"
+                    quadro_fmt.at[idx, col] = f"R$ {val:,.0f}"
 
         st.dataframe(quadro_fmt, use_container_width=True, height=320)
 
