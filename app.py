@@ -358,6 +358,7 @@ def carregar_e_processar():
     ep['DT Emissao'] = pd.to_datetime(ep['DT Emissao'], errors='coerce')
     ep['DT. Ofertada'] = pd.to_datetime(ep['DT. Ofertada'], errors='coerce')
     ep['DT. Fat. Cli'] = pd.to_datetime(ep['DT. Fat. Cli'], errors='coerce')
+    ep['Entrega'] = pd.to_datetime(ep['Entrega'], errors='coerce')
     ep['Nota Fiscal'] = pd.to_numeric(ep['Nota Fiscal'], errors='coerce')
     ep['Item'] = pd.to_numeric(ep['Item'], errors='coerce')
     ep['Vlr.Total'] = pd.to_numeric(ep['Vlr.Total'], errors='coerce')
@@ -533,15 +534,13 @@ def carregar_e_processar():
         )
     )
 
-    # Mes previsto de faturamento: cascata de datas
-    # 1) FU_Dt_Chegada_Autron, 2) Prazo_Real_Entrega, 3) DT. Ofertada
-    merged['Data_Prev_Fat'] = merged['FU_Dt_Chegada_Autron'].combine_first(
-        merged['Prazo_Real_Entrega']
-    ).combine_first(
-        merged['DT. Ofertada']
-    )
-    merged['Mes_Prev_Faturamento'] = merged['Data_Prev_Fat'].dt.to_period('M').astype(str)
-    merged.loc[merged['Data_Prev_Fat'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
+    # Mes previsto de faturamento (Previsao tab): baseado em Dt Chegada Autron
+    merged['Mes_Prev_Faturamento'] = merged['FU_Dt_Chegada_Autron'].dt.to_period('M').astype(str)
+    merged.loc[merged['FU_Dt_Chegada_Autron'].isna(), 'Mes_Prev_Faturamento'] = 'Sem previsao'
+
+    # Mes de entrega (Faturamento quadro): baseado no campo Entrega de entrada_pedido
+    merged['Mes_Entrega'] = merged['Entrega'].dt.to_period('M').astype(str)
+    merged.loc[merged['Entrega'].isna(), 'Mes_Entrega'] = 'Sem data'
 
     # Budget / Metas
     budget = None
@@ -1294,12 +1293,12 @@ with tab6:
             Fat_Liquido=('Faturamento Liquido', 'sum'),
         ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
 
-        # Total a faturar por mes (pedidos em aberto com Dt Chegada Autron)
+        # Total a faturar por mes (pedidos em aberto, campo Entrega de entrada_pedido)
         abertos_all = df[df['Status_Pedido'] == 'EM ABERTO'].copy()
-        a_faturar_mes = abertos_all[abertos_all['Mes_Prev_Faturamento'] != 'Sem previsao'].groupby(
-            'Mes_Prev_Faturamento'
+        a_faturar_mes = abertos_all[abertos_all['Mes_Entrega'] != 'Sem data'].groupby(
+            'Mes_Entrega'
         ).agg(Total_a_Faturar=('Vlr.Total', 'sum')).reset_index().rename(
-            columns={'Mes_Prev_Faturamento': 'Mes'}
+            columns={'Mes_Entrega': 'Mes'}
         )
 
         # Montar quadro consolidado 2026
@@ -1466,15 +1465,15 @@ with tab6:
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
-        # Detalhe a faturar
+        # Detalhe a faturar (campo Entrega)
         abertos_mes_atual = df[
             (df['Status_Pedido'] == 'EM ABERTO') &
-            (df['Mes_Prev_Faturamento'] == mes_atual_str)
+            (df['Mes_Entrega'] == mes_atual_str)
         ]
         if len(abertos_mes_atual) > 0:
-            st.markdown(f"### 📋 Detalhe - A Faturar em {mes_atual_str}")
+            st.markdown(f"### 📋 Detalhe - A Faturar em {mes_atual_str} (campo Entrega)")
             cols_afat = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
-                        'Ped Cliente', 'Vlr.Total', 'FU_Dt_Chegada_Autron',
+                        'Ped Cliente', 'Vlr.Total', 'Entrega', 'FU_Dt_Chegada_Autron',
                         'Pronto_para_Fazer', 'Acao_Necessaria']
             cols_afat = [c for c in cols_afat if c in abertos_mes_atual.columns]
             st.dataframe(abertos_mes_atual[cols_afat], use_container_width=True, height=300)
