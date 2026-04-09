@@ -258,6 +258,39 @@ def kpi_card(valor, label, tipo="normal"):
     """
 
 
+def filtro_data(data_df, col_data, label, tab_key):
+    """Exibe filtro de data (inicio/fim) e retorna o dataframe filtrado.
+    Filtra graficos e tabelas da aba correspondente."""
+    datas_validas = data_df[col_data].dropna()
+    if len(datas_validas) == 0:
+        return data_df
+
+    data_min = datas_validas.min().date()
+    data_max = datas_validas.max().date()
+
+    col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+    with col_f1:
+        dt_ini = st.date_input(
+            f"De ({label})", value=data_min, min_value=data_min,
+            max_value=data_max, key=f"dt_ini_{tab_key}"
+        )
+    with col_f2:
+        dt_fim = st.date_input(
+            f"Ate ({label})", value=data_max, min_value=data_min,
+            max_value=data_max, key=f"dt_fim_{tab_key}"
+        )
+    with col_f3:
+        st.markdown("")
+
+    dt_ini = pd.Timestamp(dt_ini)
+    dt_fim = pd.Timestamp(dt_fim) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+
+    mask = (data_df[col_data] >= dt_ini) & (data_df[col_data] <= dt_fim)
+    # Manter linhas sem data (nao excluir por falta de informacao)
+    mask = mask | data_df[col_data].isna()
+    return data_df[mask]
+
+
 # ========================================================================
 # CARGA E PROCESSAMENTO DE DADOS
 # ========================================================================
@@ -742,13 +775,15 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 # ===== ABA 1: VISAO GERAL =====
 with tab1:
+    filtered_t1 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab1')
+
     # KPIs
-    total_pvs = filtered['Num. Pedido'].nunique()
-    total_linhas = len(filtered)
-    em_aberto = len(filtered[filtered['Status_Pedido'] == 'EM ABERTO'])
-    finalizados = len(filtered[filtered['Status_Pedido'] == 'FINALIZADO'])
-    valor_total = filtered['Vlr.Total'].sum()
-    valor_aberto = filtered.loc[filtered['Status_Pedido'] == 'EM ABERTO', 'Vlr.Total'].sum()
+    total_pvs = filtered_t1['Num. Pedido'].nunique()
+    total_linhas = len(filtered_t1)
+    em_aberto = len(filtered_t1[filtered_t1['Status_Pedido'] == 'EM ABERTO'])
+    finalizados = len(filtered_t1[filtered_t1['Status_Pedido'] == 'FINALIZADO'])
+    valor_total = filtered_t1['Vlr.Total'].sum()
+    valor_aberto = filtered_t1.loc[filtered_t1['Status_Pedido'] == 'EM ABERTO', 'Vlr.Total'].sum()
     pct = (finalizados / total_linhas * 100) if total_linhas > 0 else 0
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -765,8 +800,8 @@ with tab1:
 
     with col1:
         # Entrada de pedidos por mes
-        if len(filtered) > 0:
-            pedidos_mes = filtered.groupby('Mes_Emissao').size().reset_index(name='Qtd')
+        if len(filtered_t1) > 0:
+            pedidos_mes = filtered_t1.groupby('Mes_Emissao').size().reset_index(name='Qtd')
             pedidos_mes = pedidos_mes.sort_values('Mes_Emissao')
             fig = px.bar(pedidos_mes, x='Mes_Emissao', y='Qtd',
                         title='Entrada de Pedidos por Mes',
@@ -780,8 +815,8 @@ with tab1:
 
     with col2:
         # Status
-        if len(filtered) > 0:
-            status_count = filtered['Status_Pedido'].value_counts().reset_index()
+        if len(filtered_t1) > 0:
+            status_count = filtered_t1['Status_Pedido'].value_counts().reset_index()
             status_count.columns = ['Status', 'Qtd']
             cores_status = {'FINALIZADO': CORES['verde'], 'EM ABERTO': CORES['vermelho']}
             fig2 = px.pie(status_count, values='Qtd', names='Status',
@@ -795,8 +830,8 @@ with tab1:
             st.plotly_chart(fig2, use_container_width=True)
 
     # Pedidos por vendedor
-    if len(filtered) > 0 and 'Nome do Vendedor' in filtered.columns:
-        vend_data = filtered.groupby(['Nome do Vendedor', 'Status_Pedido']).size().reset_index(name='Qtd')
+    if len(filtered_t1) > 0 and 'Nome do Vendedor' in filtered_t1.columns:
+        vend_data = filtered_t1.groupby(['Nome do Vendedor', 'Status_Pedido']).size().reset_index(name='Qtd')
         fig3 = px.bar(vend_data, x='Nome do Vendedor', y='Qtd', color='Status_Pedido',
                      title='Pedidos por Vendedor',
                      color_discrete_map={'FINALIZADO': CORES['verde'], 'EM ABERTO': CORES['vermelho']},
@@ -811,7 +846,8 @@ with tab1:
 
 # ===== ABA 2: PRONTIDAO =====
 with tab2:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    filtered_t2 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab2')
+    abertos = filtered_t2[filtered_t2['Status_Pedido'] == 'EM ABERTO']
 
     prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'SIM'])
     parciais = len(abertos[abertos['Pronto_para_Fazer'].str.contains('PARCIAL', na=False)])
@@ -899,7 +935,8 @@ with tab2:
 
 # ===== ABA 3: PREVISAO ENTREGA =====
 with tab3:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3')
+    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
 
     atrasados = len(abertos[abertos['Dias_Atraso_Cliente'] > 0])
     media_atraso = abertos.loc[abertos['Dias_Atraso_Cliente'] > 0, 'Dias_Atraso_Cliente'].mean()
@@ -985,7 +1022,8 @@ with tab3:
 
 # ===== ABA 4: ESTOQUE & SC/OP =====
 with tab4:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    filtered_t4 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab4')
+    abertos = filtered_t4[filtered_t4['Status_Pedido'] == 'EM ABERTO']
 
     com_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'SIM'])
     sem_estoque = len(abertos[abertos['Disponivel_Estoque'] == 'NAO'])
@@ -1093,11 +1131,13 @@ with tab5:
     mes_atual_str = str(today_period)
 
     if df_fat is not None and len(df_fat) > 0:
+        df_fat_f = filtro_data(df_fat, 'Emissao', 'Emissao NF', 'tab5')
+
         # --- KPIs de Faturamento ---
-        fat_total = df_fat['Vlr.Total.Fat'].sum()
-        fat_bruto = df_fat['Faturamento Bruto'].sum()
-        fat_liquido = df_fat['Faturamento Liquido'].sum()
-        fat_mes_atual = df_fat[df_fat['Mes_Faturamento'] == mes_atual_str]
+        fat_total = df_fat_f['Vlr.Total.Fat'].sum()
+        fat_bruto = df_fat_f['Faturamento Bruto'].sum()
+        fat_liquido = df_fat_f['Faturamento Liquido'].sum()
+        fat_mes_atual = df_fat_f[df_fat_f['Mes_Faturamento'] == mes_atual_str]
         fat_mes_valor = fat_mes_atual['Vlr.Total.Fat'].sum()
         fat_mes_nfs = fat_mes_atual['Num. Docto.'].nunique() if 'Num. Docto.' in fat_mes_atual.columns else 0
 
@@ -1121,7 +1161,7 @@ with tab5:
 
         with col1:
             # Faturamento mes a mes
-            fat_por_mes = df_fat.groupby('Mes_Faturamento').agg(
+            fat_por_mes = df_fat_f.groupby('Mes_Faturamento').agg(
                 Valor=('Vlr.Total.Fat', 'sum'),
                 Fat_Bruto=('Faturamento Bruto', 'sum'),
                 Fat_Liquido=('Faturamento Liquido', 'sum'),
@@ -1173,7 +1213,8 @@ with tab5:
 
 # ===== ABA 6: PREVISAO FATURAMENTO =====
 with tab6:
-    abertos = filtered[filtered['Status_Pedido'] == 'EM ABERTO']
+    filtered_t6 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab6')
+    abertos = filtered_t6[filtered_t6['Status_Pedido'] == 'EM ABERTO']
 
     if len(abertos) > 0:
         # Previsao de faturamento baseado em Dt Chegada Autron
@@ -1213,7 +1254,7 @@ with tab6:
 
         # Entrada de pedidos mes a mes
         st.markdown("### 📋 Entrada de Pedidos Mes a Mes")
-        entrada_mes = filtered.groupby('Mes_Emissao').agg(
+        entrada_mes = filtered_t6.groupby('Mes_Emissao').agg(
             Qtd_Linhas=('Vlr.Total', 'count'),
             Qtd_PVs=('Num. Pedido', 'nunique'),
             Valor_Total=('Vlr.Total', 'sum'),
