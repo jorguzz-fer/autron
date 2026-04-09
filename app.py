@@ -96,7 +96,10 @@ def tela_login():
     with col2:
         logo_login = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
         if os.path.exists(logo_login):
-            st.image(logo_login, width=220, use_container_width=False)
+            import base64
+            with open(logo_login, "rb") as f:
+                logo_b64 = base64.b64encode(f.read()).decode()
+            st.markdown(f'<div style="text-align:center;"><img src="data:image/png;base64,{logo_b64}" width="220"></div>', unsafe_allow_html=True)
         st.markdown('<div class="login-subtitle">Dashboard de Pedidos</div>', unsafe_allow_html=True)
 
         with st.form("login_form"):
