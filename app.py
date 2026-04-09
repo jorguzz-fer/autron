@@ -300,19 +300,35 @@ def filtro_data(data_df, col_data, label, tab_key):
 def carregar_e_processar():
     """Carrega os 5 arquivos e processa toda a logica de negocio."""
 
-    arq_entrada = os.path.join(DATA_DIR, "entrada_pedido.xlsx")
-    arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
-    arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
-    arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
-    if not os.path.exists(arq_faturamento):
-        arq_faturamento = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faturamento.xlsx")
-    arq_budget = os.path.join(DATA_DIR, "Metas_Budget_Grupo_Autron_2026.xlsx")
-    if not os.path.exists(arq_budget):
-        arq_budget = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Metas_Budget_Grupo_Autron_2026.xlsx")
+    REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+    def resolver_arquivo(nome):
+        """Busca arquivo em DATA_DIR primeiro, depois na raiz do repo.
+        Se existir nos dois, usa o mais recente."""
+        arq_dados = os.path.join(DATA_DIR, nome)
+        arq_repo = os.path.join(REPO_DIR, nome)
+        existe_dados = os.path.exists(arq_dados)
+        existe_repo = os.path.exists(arq_repo)
+        if existe_dados and existe_repo:
+            # Usar o mais recente
+            if os.path.getmtime(arq_repo) > os.path.getmtime(arq_dados):
+                return arq_repo
+            return arq_dados
+        if existe_dados:
+            return arq_dados
+        if existe_repo:
+            return arq_repo
+        return arq_dados  # retorna path padrao (vai falhar no check)
+
+    arq_entrada = resolver_arquivo("entrada_pedido.xlsx")
+    arq_followup = resolver_arquivo("followup.xlsx")
+    arq_estoque = resolver_arquivo("mata010.xlsx")
+    arq_faturamento = resolver_arquivo("faturamento.xlsx")
+    arq_budget = resolver_arquivo("Metas_Budget_Grupo_Autron_2026.xlsx")
     # Aceitar ambos os nomes do CSV
-    arq_sciozmq = os.path.join(DATA_DIR, "sciozvs0.csv")
+    arq_sciozmq = resolver_arquivo("sciozvs0.csv")
     if not os.path.exists(arq_sciozmq):
-        arq_sciozmq = os.path.join(DATA_DIR, "sciozmq0.csv")
+        arq_sciozmq = resolver_arquivo("sciozmq0.csv")
 
     for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
         if not os.path.exists(arq):
