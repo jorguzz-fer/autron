@@ -1392,8 +1392,6 @@ with tab6:
 
         # Mes anterior ao atual (regra: primeiro bloco sempre mostra mes anterior)
         mes_anterior = str((today_period - 1))
-        if mes_anterior not in quadro['Mes'].values:
-            mes_anterior = ultimo_mes_fechado
 
         # Faturamento LIQUIDO por mes (base do realizado)
         fat_liq_mes = df_fat.groupby('Mes_Faturamento').agg(
@@ -1445,6 +1443,8 @@ with tab6:
         )
 
         # --- KPIs do mes anterior (sempre o mes anterior ao atual) ---
+        if mes_anterior not in quadro['Mes'].values:
+            mes_anterior = ultimo_mes_fechado
         ult = quadro[quadro['Mes'] == mes_anterior]
         if len(ult) > 0:
             ult = ult.iloc[0]
