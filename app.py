@@ -304,7 +304,11 @@ def carregar_e_processar():
     arq_followup = os.path.join(DATA_DIR, "followup.xlsx")
     arq_estoque = os.path.join(DATA_DIR, "mata010.xlsx")
     arq_faturamento = os.path.join(DATA_DIR, "faturamento.xlsx")
+    if not os.path.exists(arq_faturamento):
+        arq_faturamento = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faturamento.xlsx")
     arq_budget = os.path.join(DATA_DIR, "Metas_Budget_Grupo_Autron_2026.xlsx")
+    if not os.path.exists(arq_budget):
+        arq_budget = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Metas_Budget_Grupo_Autron_2026.xlsx")
     # Aceitar ambos os nomes do CSV
     arq_sciozmq = os.path.join(DATA_DIR, "sciozvs0.csv")
     if not os.path.exists(arq_sciozmq):
