@@ -809,8 +809,8 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ========================================================================
 # ABAS PRINCIPAIS
 # ========================================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Visao Geral", "✅ Prontidao", "📅 Previsao Entrega",
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📊 Visao Geral", "📋 Entrada de Pedidos", "✅ Prontidao", "📅 Previsao Entrega",
     "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao Faturamento"
 ])
 
@@ -886,10 +886,105 @@ with tab1:
         st.plotly_chart(fig3, use_container_width=True)
 
 
-# ===== ABA 2: PRONTIDAO =====
+# ===== ABA 2: ENTRADA DE PEDIDOS =====
 with tab2:
-    filtered_t2 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab2')
-    abertos = filtered_t2[filtered_t2['Status_Pedido'] == 'EM ABERTO']
+    filtered_t2 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab2_entrada')
+
+    # KPIs
+    total_ep = len(filtered_t2)
+    total_pvs_ep = filtered_t2['Num. Pedido'].nunique()
+    valor_total_ep = filtered_t2['Vlr.Total'].sum()
+
+    # Entrada 2026
+    ep_2026 = filtered_t2[filtered_t2['Ano_Emissao'] == 2026]
+    valor_2026 = ep_2026['Vlr.Total'].sum()
+    pvs_2026 = ep_2026['Num. Pedido'].nunique()
+
+    # Meta entrada (do budget)
+    meta_entrada_total = 0
+    if df_budget is not None and 'Meta_Entrada' in df_budget.columns:
+        meta_entrada_total = df_budget['Meta_Entrada'].sum()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.markdown(kpi_card(f"{total_pvs_ep}", "Total PVs"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{total_ep:,}", "Total Linhas"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"R$ {valor_total_ep:,.0f}", "Valor Total"), unsafe_allow_html=True)
+    c4.markdown(kpi_card(f"R$ {valor_2026:,.0f}", "Valor 2026"), unsafe_allow_html=True)
+    c5.markdown(kpi_card(f"R$ {meta_entrada_total:,.0f}", "Meta 2026 (Budget)"), unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # Entrada de pedidos mes a mes
+    entrada_mes = filtered_t2.groupby('Mes_Emissao').agg(
+        Qtd_Linhas=('Vlr.Total', 'count'),
+        Qtd_PVs=('Num. Pedido', 'nunique'),
+        Valor_Total=('Vlr.Total', 'sum'),
+    ).reset_index().sort_values('Mes_Emissao')
+    entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        fig_ent = px.bar(entrada_mes, x='Mes', y='Valor Total',
+                        title='Entrada de Pedidos - Valor por Mes (DT Emissao)',
+                        color_discrete_sequence=[CORES['azul_claro']],
+                        text='Qtd PVs')
+        fig_ent.update_traces(texttemplate='%{text} PVs', textposition='outside')
+        fig_ent.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
+        )
+        st.plotly_chart(fig_ent, use_container_width=True)
+    with col2:
+        st.dataframe(entrada_mes, use_container_width=True, height=450)
+
+    # Meta x Realizado Entrada (Budget) - apenas 2026
+    if df_budget is not None and 'Meta_Entrada' in df_budget.columns:
+        st.markdown("### 📊 Meta x Realizado - Entrada de Pedidos 2026")
+
+        ep_mes_2026 = ep_2026.groupby('Mes_Emissao').agg(
+            Realizado=('Vlr.Total', 'sum'),
+        ).reset_index().rename(columns={'Mes_Emissao': 'Mes'})
+
+        comp_ent = df_budget[['Mes', 'Meta_Entrada']].copy()
+        comp_ent.rename(columns={'Meta_Entrada': 'Meta'}, inplace=True)
+        comp_ent = comp_ent.merge(ep_mes_2026, on='Mes', how='outer').fillna(0).sort_values('Mes')
+        comp_ent = comp_ent[comp_ent['Mes'].str.startswith('2026')]
+        comp_ent['Ating. %'] = np.where(
+            comp_ent['Meta'] > 0,
+            (comp_ent['Realizado'] / comp_ent['Meta'] * 100), 0
+        )
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_comp_ent = go.Figure()
+            fig_comp_ent.add_trace(go.Bar(
+                x=comp_ent['Mes'], y=comp_ent['Meta'], name='Meta',
+                marker_color=CORES['azul_claro'], opacity=0.7
+            ))
+            fig_comp_ent.add_trace(go.Bar(
+                x=comp_ent['Mes'], y=comp_ent['Realizado'], name='Realizado',
+                marker_color=CORES['verde']
+            ))
+            fig_comp_ent.update_layout(
+                barmode='group',
+                title='Meta x Realizado - Entrada de Pedidos 2026',
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig_comp_ent, use_container_width=True)
+        with col2:
+            comp_ent_display = comp_ent.copy()
+            comp_ent_display['Meta'] = comp_ent_display['Meta'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_ent_display['Realizado'] = comp_ent_display['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_ent_display['Ating. %'] = comp_ent_display['Ating. %'].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(comp_ent_display, use_container_width=True, height=400)
+
+
+# ===== ABA 3: PRONTIDAO =====
+with tab3:
+    filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3_prontidao')
+    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
 
     prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'SIM'])
     parciais = len(abertos[abertos['Pronto_para_Fazer'].str.contains('PARCIAL', na=False)])
@@ -975,8 +1070,8 @@ with tab2:
         st.info("Nenhum pedido em aberto com os filtros selecionados.")
 
 
-# ===== ABA 3: PREVISAO ENTREGA =====
-with tab3:
+# ===== ABA 4: PREVISAO ENTREGA =====
+with tab4:
     filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3')
     abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
 
@@ -1062,8 +1157,8 @@ with tab3:
         st.dataframe(styled, use_container_width=True, height=500)
 
 
-# ===== ABA 4: ESTOQUE & SC/OP =====
-with tab4:
+# ===== ABA 5: ESTOQUE & SC/OP =====
+with tab5:
     filtered_t4 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab4')
     abertos = filtered_t4[filtered_t4['Status_Pedido'] == 'EM ABERTO']
 
@@ -1167,8 +1262,8 @@ with tab4:
         st.dataframe(erro_display, use_container_width=True)
 
 
-# ===== ABA 5: FATURAMENTO =====
-with tab5:
+# ===== ABA 6: FATURAMENTO =====
+with tab6:
     today_period = pd.Timestamp.now().normalize().to_period('M')
     mes_atual_str = str(today_period)
 
@@ -1373,10 +1468,10 @@ with tab5:
         st.warning("Arquivo faturamento.xlsx nao carregado. Envie o arquivo para ver esta aba.")
 
 
-# ===== ABA 6: PREVISAO FATURAMENTO =====
-with tab6:
-    filtered_t6 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab6')
-    abertos = filtered_t6[filtered_t6['Status_Pedido'] == 'EM ABERTO']
+# ===== ABA 7: PREVISAO FATURAMENTO =====
+with tab7:
+    filtered_t7 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab7_previsao')
+    abertos = filtered_t7[filtered_t7['Status_Pedido'] == 'EM ABERTO']
 
     if len(abertos) > 0:
         # Previsao de faturamento baseado em Dt Chegada Autron
@@ -1413,30 +1508,6 @@ with tab6:
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
             )
             st.plotly_chart(fig_prev, use_container_width=True)
-
-        # Entrada de pedidos mes a mes
-        st.markdown("### 📋 Entrada de Pedidos Mes a Mes")
-        entrada_mes = filtered_t6.groupby('Mes_Emissao').agg(
-            Qtd_Linhas=('Vlr.Total', 'count'),
-            Qtd_PVs=('Num. Pedido', 'nunique'),
-            Valor_Total=('Vlr.Total', 'sum'),
-        ).reset_index().sort_values('Mes_Emissao')
-        entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
-
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            fig_ent = px.bar(entrada_mes, x='Mes', y='Valor Total',
-                            title='Entrada de Pedidos - Valor por Mes (DT Emissao)',
-                            color_discrete_sequence=[CORES['azul_claro']],
-                            text='Qtd PVs')
-            fig_ent.update_traces(texttemplate='%{text} PVs', textposition='outside')
-            fig_ent.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
-            )
-            st.plotly_chart(fig_ent, use_container_width=True)
-        with col2:
-            st.dataframe(entrada_mes, use_container_width=True, height=400)
 
         # Tabela previsao detalhada
         st.markdown("### 📋 Previsao Detalhada")
