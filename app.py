@@ -1538,6 +1538,67 @@ with tab6:
 
         st.markdown("")
 
+        # --- COMPARATIVO 2025 x 2026 (Fat. Liquido mes a mes) ---
+        st.markdown("### 📊 Faturamento Líquido - 2025 x 2026")
+
+        fat_anos = df_fat.copy()
+        fat_anos['Ano'] = fat_anos['Emissao'].dt.year
+        fat_anos['Mes_Num'] = fat_anos['Emissao'].dt.month
+
+        fat_25 = fat_anos[fat_anos['Ano'] == 2025].groupby('Mes_Num')['Faturamento Liquido'].sum()
+        fat_26 = fat_anos[fat_anos['Ano'] == 2026].groupby('Mes_Num')['Faturamento Liquido'].sum()
+
+        meses_nomes_curto = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+        comp_ano = pd.DataFrame({
+            'Mes': meses_nomes_curto,
+            '2025': [fat_25.get(m+1, 0) for m in range(12)],
+            '2026': [fat_26.get(m+1, 0) for m in range(12)],
+        })
+        comp_ano['Diferenca_Pct'] = np.where(
+            comp_ano['2025'] > 0,
+            ((comp_ano['2026'] - comp_ano['2025']) / comp_ano['2025'] * 100),
+            np.nan
+        )
+
+        fig_anos = go.Figure()
+        fig_anos.add_trace(go.Bar(
+            x=comp_ano['Mes'], y=comp_ano['2025'], name='2025',
+            marker_color='#4472C4',
+            text=comp_ano['2025'].apply(lambda x: f"R$ {x:,.0f}".replace(',', '.') if x > 0 else ''),
+            textposition='outside', textfont=dict(size=10, color='#4472C4'),
+        ))
+        fig_anos.add_trace(go.Bar(
+            x=comp_ano['Mes'], y=comp_ano['2026'], name='2026',
+            marker_color='#70AD47',
+            text=comp_ano.apply(
+                lambda r: f"R$ {r['2026']:,.0f}".replace(',', '.') +
+                          (f"<br>{r['Diferenca_Pct']:+.1f}%" if pd.notna(r['Diferenca_Pct']) and r['2026'] > 0 else '')
+                if r['2026'] > 0 else '', axis=1
+            ),
+            textposition='outside', textfont=dict(size=10, color='#70AD47'),
+        ))
+        fig_anos.update_layout(
+            barmode='group',
+            title='Faturamento Líquido - 2025 x 2026',
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
+            height=500,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+            yaxis=dict(showticklabels=False, showgrid=False),
+        )
+        st.plotly_chart(fig_anos, use_container_width=True)
+
+        # Totais anuais
+        total_25 = comp_ano['2025'].sum()
+        total_26 = comp_ano['2026'].sum()
+        diff_total = ((total_26 - total_25) / total_25 * 100) if total_25 > 0 else 0
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(kpi_card(f"R$ {total_25:,.0f}", "Total 2025"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {total_26:,.0f}", "Total 2026"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{diff_total:+.1f}%", "Variacao", "ok" if diff_total >= 0 else "alert"), unsafe_allow_html=True)
+
+        st.markdown("")
+
         # --- QUADRO PRINCIPAL (estilo planilha da Daniele) ---
         st.markdown("### 📊 Quadro Faturamento - Meta x Realizado")
 
