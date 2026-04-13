@@ -831,27 +831,142 @@ with st.sidebar:
     try:
         import io
         buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            # Base consolidada
-            cols_base = [
-                'Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
-                'Ped Cliente', 'Cliente', 'Razao Social', 'Nome do Vendedor',
-                'Unidade Negocio', 'DT Emissao', 'Mes_Emissao', 'Ano_Emissao',
-                'DT. Fat. Cli', 'DT. Ofertada', 'Entrega',
-                'Quantidade', 'Prc Unitario', 'Vlr.Total', 'Margem',
-                'Nota Fiscal', 'Status_Pedido', 'Tipo_Produto',
-                'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
-                'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'Acao_Necessaria',
-                'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Prazo_Real_Entrega',
-                'Semana_Entrega', 'FU_Dt_Chegada_Autron',
-                'Mes_Entrega', 'Mes_Prev_Faturamento',
-                'Dias_Atraso_Cliente', 'Pronto_para_Fazer',
-            ]
-            cols_base = [c for c in cols_base if c in df.columns]
-            df[cols_base].to_excel(writer, sheet_name='Base Consolidada', index=False)
+        today_ts = pd.Timestamp.now().normalize()
+        mes_atual_period = str(today_ts.to_period('M'))
 
-            if df_fat is not None:
-                df_fat.to_excel(writer, sheet_name='Faturamento', index=False)
+        # --- 1) Base Consolidada (uma linha por produto/PV) ---
+        cols_base_export = [
+            'Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
+            'Ped Cliente', 'Cliente', 'Razao Social', 'Nome do Vendedor',
+            'Unidade Negocio',
+            'DT Emissao', 'Mes_Emissao', 'Ano_Emissao',
+            'DT. Fat. Cli', 'DT. Ofertada', 'Entrega',
+            'Quantidade', 'Prc Unitario', 'Vlr.Total', 'Margem',
+            'Nota Fiscal', 'Status_Pedido',
+            'Tipo_Produto',
+            'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
+            'Numero SC', 'Numero OP', 'FU_OP_na_SC',
+            'Acao_Necessaria',
+            'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Prazo_Real_Entrega',
+            'Semana_Entrega', 'FU_Dt_Chegada_Autron',
+            'Mes_Entrega', 'Mes_Prev_Faturamento',
+            'Dias_Atraso_Cliente', 'Dias_Atraso_Ofertada',
+            'Pronto_para_Fazer',
+        ]
+        cols_base_export = [c for c in cols_base_export if c in df.columns]
+        base = df[cols_base_export].copy()
+
+        # --- 2) Entrada de Pedidos Mes a Mes ---
+        entrada_mes = df.groupby('Mes_Emissao').agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Total=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Emissao')
+        entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
+
+        # --- 3) Faturamento Mes a Mes (se tiver faturamento) ---
+        fat_mes_export = pd.DataFrame()
+        if df_fat is not None:
+            fat_mes_export = df_fat.groupby('Mes_Faturamento').agg(
+                Qtd_NFs=('Num. Docto.', 'nunique'),
+                Valor_Total=('Vlr.Total.Fat', 'sum'),
+                Fat_Bruto=('Faturamento Bruto', 'sum'),
+                Fat_Liquido=('Faturamento Liquido', 'sum'),
+            ).reset_index().sort_values('Mes_Faturamento')
+            fat_mes_export.columns = ['Mes', 'Qtd NFs', 'Valor Total', 'Fat. Bruto', 'Fat. Liquido']
+
+        # --- 4) Previsao de Faturamento (Dt Chegada Autron) ---
+        abertos = df[df['Status_Pedido'] == 'EM ABERTO'].copy()
+        prev_fat = abertos[abertos['Mes_Prev_Faturamento'] != 'Sem previsao'].groupby(
+            'Mes_Prev_Faturamento'
+        ).agg(
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Previsto=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Mes_Prev_Faturamento')
+        prev_fat.columns = ['Mes Previsto', 'Qtd Linhas', 'Qtd PVs', 'Valor Previsto']
+
+        # --- 5) Quadro Faturamento Meta x Realizado x Projecao (estilo Daniele) ---
+        quadro_export = pd.DataFrame()
+        if df_fat is not None and df_budget is not None:
+            fat_liq_mes = df_fat.groupby('Mes_Faturamento').agg(
+                Fat_Bruto=('Faturamento Bruto', 'sum'),
+                Fat_Liquido=('Faturamento Liquido', 'sum'),
+            ).reset_index().rename(columns={'Mes_Faturamento': 'Mes'})
+
+            a_faturar_mes_q = abertos[abertos['Mes_Entrega'] != 'Sem data'].groupby(
+                'Mes_Entrega'
+            ).agg(Total_a_Faturar=('Vlr.Total', 'sum')).reset_index().rename(
+                columns={'Mes_Entrega': 'Mes'}
+            )
+
+            quadro_export = df_budget[['Mes', 'Meta_Receita_Liquida']].copy()
+            quadro_export.rename(columns={'Meta_Receita_Liquida': 'Meta_Rec_Liquida'}, inplace=True)
+            quadro_export = quadro_export.merge(fat_liq_mes, on='Mes', how='left')
+            quadro_export = quadro_export.merge(a_faturar_mes_q, on='Mes', how='left')
+            quadro_export = quadro_export.fillna(0).sort_values('Mes')
+            quadro_export = quadro_export[quadro_export['Mes'].str.startswith('2026')]
+            quadro_export['Status_Mes'] = quadro_export['Mes'].apply(
+                lambda m: 'Fechado' if m < mes_atual_period else ('Atual' if m == mes_atual_period else 'Futuro')
+            )
+            quadro_export.loc[quadro_export['Status_Mes'] == 'Fechado', 'Total_a_Faturar'] = 0
+            quadro_export['Total_Liq_a_Faturar'] = quadro_export['Total_a_Faturar'] * 0.83
+            quadro_export['Total_Liquido_Projetado'] = quadro_export['Fat_Liquido'] + quadro_export['Total_Liq_a_Faturar']
+            quadro_export['Diferenca_Meta'] = quadro_export['Total_Liquido_Projetado'] - quadro_export['Meta_Rec_Liquida']
+            quadro_export['Ating_Pct'] = np.where(
+                quadro_export['Meta_Rec_Liquida'] > 0,
+                (quadro_export['Total_Liquido_Projetado'] / quadro_export['Meta_Rec_Liquida'] * 100), 0
+            )
+
+        # --- 6) Meta x Realizado Entrada de Pedidos (GRUPO, AUTRON, ERGOMEC) ---
+        meta_ent_export = pd.DataFrame()
+        if df_budget is not None:
+            ep_2026 = df[df['Ano_Emissao'] == 2026].copy()
+            # GRUPO
+            ep_mes = ep_2026.groupby('Mes_Emissao').agg(Grupo_Realizado=('Vlr.Total', 'sum')).reset_index().rename(columns={'Mes_Emissao': 'Mes'})
+            # AUTRON (sem IND21)
+            ep_aut = ep_2026[ep_2026['Unidade Negocio'] != 'IND21'] if 'Unidade Negocio' in ep_2026.columns else ep_2026
+            ep_aut_mes = ep_aut.groupby('Mes_Emissao').agg(Autron_Realizado=('Vlr.Total', 'sum')).reset_index().rename(columns={'Mes_Emissao': 'Mes'})
+            # ERGOMEC (IND21)
+            ep_erg = ep_2026[ep_2026['Unidade Negocio'] == 'IND21'] if 'Unidade Negocio' in ep_2026.columns else pd.DataFrame(columns=ep_2026.columns)
+            ep_erg_mes = ep_erg.groupby('Mes_Emissao').agg(Ergomec_Realizado=('Vlr.Total', 'sum')).reset_index().rename(columns={'Mes_Emissao': 'Mes'}) if len(ep_erg) > 0 else pd.DataFrame(columns=['Mes', 'Ergomec_Realizado'])
+
+            meta_ent_export = df_budget[['Mes', 'Meta_Entrada', 'Meta_Entrada_Autron', 'Meta_Entrada_Ergomec']].copy()
+            meta_ent_export.rename(columns={
+                'Meta_Entrada': 'Grupo_Meta',
+                'Meta_Entrada_Autron': 'Autron_Meta',
+                'Meta_Entrada_Ergomec': 'Ergomec_Meta',
+            }, inplace=True)
+            meta_ent_export = meta_ent_export.merge(ep_mes, on='Mes', how='left')
+            meta_ent_export = meta_ent_export.merge(ep_aut_mes, on='Mes', how='left')
+            meta_ent_export = meta_ent_export.merge(ep_erg_mes, on='Mes', how='left')
+            meta_ent_export = meta_ent_export.fillna(0).sort_values('Mes')
+            meta_ent_export = meta_ent_export[meta_ent_export['Mes'].str.startswith('2026')]
+
+        # --- 7) Alertas ERRO no CADASTRO ---
+        erros_export = df[df['Acao_Necessaria'] == 'ERRO no CADASTRO'].copy()
+        cols_erros = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
+                      'Tipo_Produto', 'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'Acao_Necessaria']
+        cols_erros = [c for c in cols_erros if c in erros_export.columns]
+        erros_export = erros_export[cols_erros]
+
+        # --- 8) Carteira em Aberto (detalhe) ---
+        carteira_export = df[df['Status_Pedido'] == 'EM ABERTO'][cols_base_export].copy()
+
+        # Escrever arquivo
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            base.to_excel(writer, sheet_name='Base Consolidada', index=False)
+            carteira_export.to_excel(writer, sheet_name='Carteira em Aberto', index=False)
+            entrada_mes.to_excel(writer, sheet_name='Entrada Pedidos Mes', index=False)
+            if len(fat_mes_export) > 0:
+                fat_mes_export.to_excel(writer, sheet_name='Faturamento Mes', index=False)
+            if len(quadro_export) > 0:
+                quadro_export.to_excel(writer, sheet_name='Quadro Faturamento', index=False)
+            if len(meta_ent_export) > 0:
+                meta_ent_export.to_excel(writer, sheet_name='Meta Entrada Pedidos', index=False)
+            prev_fat.to_excel(writer, sheet_name='Previsao Faturamento', index=False)
+            if len(erros_export) > 0:
+                erros_export.to_excel(writer, sheet_name='Alertas Erro Cadastro', index=False)
             if df_budget is not None:
                 df_budget.to_excel(writer, sheet_name='Budget', index=False)
         buffer.seek(0)
