@@ -826,6 +826,46 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+    # --- Download da planilha consolidada ---
+    st.markdown("---")
+    try:
+        import io
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            # Base consolidada
+            cols_base = [
+                'Num. Pedido', 'Item', 'Produto', 'Descricao do Produto',
+                'Ped Cliente', 'Cliente', 'Razao Social', 'Nome do Vendedor',
+                'Unidade Negocio', 'DT Emissao', 'Mes_Emissao', 'Ano_Emissao',
+                'DT. Fat. Cli', 'DT. Ofertada', 'Entrega',
+                'Quantidade', 'Prc Unitario', 'Vlr.Total', 'Margem',
+                'Nota Fiscal', 'Status_Pedido', 'Tipo_Produto',
+                'Estoque_Disponivel', 'Qtd_Alocada', 'Disponivel_Estoque',
+                'Numero SC', 'Numero OP', 'FU_OP_na_SC', 'Acao_Necessaria',
+                'FU_Dt_Confirma', 'FU_Dt_Pre_Entr', 'Prazo_Real_Entrega',
+                'Semana_Entrega', 'FU_Dt_Chegada_Autron',
+                'Mes_Entrega', 'Mes_Prev_Faturamento',
+                'Dias_Atraso_Cliente', 'Pronto_para_Fazer',
+            ]
+            cols_base = [c for c in cols_base if c in df.columns]
+            df[cols_base].to_excel(writer, sheet_name='Base Consolidada', index=False)
+
+            if df_fat is not None:
+                df_fat.to_excel(writer, sheet_name='Faturamento', index=False)
+            if df_budget is not None:
+                df_budget.to_excel(writer, sheet_name='Budget', index=False)
+        buffer.seek(0)
+
+        st.download_button(
+            label="⬇️ Baixar Planilha",
+            data=buffer,
+            file_name=f"dashboard_autron_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.caption(f"Erro ao gerar planilha: {e}")
+
     # Usuario logado e logout
     if LOGIN_HABILITADO:
         st.markdown("---")
