@@ -344,29 +344,91 @@ def carregar_e_processar():
     # Faturamento (opcional - pode nao existir)
     fat = None
     if os.path.exists(arq_faturamento):
-        # Tentar diferentes linhas de header ate achar a coluna Emissao
-        fat = None
-        for h in [1, 0, 2]:
-            try:
-                tmp = pd.read_excel(arq_faturamento, header=h)
-                tmp.columns = tmp.columns.astype(str).str.strip()
-                if any('emiss' in c.lower() for c in tmp.columns):
-                    fat = tmp
-                    break
-            except Exception:
-                continue
-        if fat is None:
-            fat = pd.read_excel(arq_faturamento, header=1)
-            fat.columns = fat.columns.astype(str).str.strip()
+        # Detectar abas do arquivo (vendas + devolucoes, ou folha unica)
+        try:
+            xl = pd.ExcelFile(arq_faturamento)
+            abas = xl.sheet_names
+        except Exception:
+            abas = []
 
-        # Localizar coluna Emissao
-        col_emiss = [c for c in fat.columns if 'emiss' in c.lower() and 'nf' not in c.lower()]
-        if col_emiss:
-            fat.rename(columns={col_emiss[0]: 'Emissao'}, inplace=True)
+        def _ler_aba(nome_aba):
+            for h in [1, 0, 2]:
+                try:
+                    tmp = pd.read_excel(arq_faturamento, sheet_name=nome_aba, header=h)
+                    tmp.columns = tmp.columns.astype(str).str.strip()
+                    if any(k in c.lower() for c in tmp.columns for k in ('emiss', 'digitac', 'documento')):
+                        return tmp
+                except Exception:
+                    continue
+            return pd.read_excel(arq_faturamento, sheet_name=nome_aba, header=1)
+
+        # Identificar aba de vendas e aba de devolucoes
+        aba_vendas = None
+        aba_devol = None
+        for s in abas:
+            sl = s.lower()
+            if 'venda' in sl and 'dev' not in sl:
+                aba_vendas = s
+            elif 'dev' in sl:
+                aba_devol = s
+        if not aba_vendas and abas:
+            aba_vendas = abas[0]
+
+        fat_vendas = _ler_aba(aba_vendas) if aba_vendas else pd.read_excel(arq_faturamento, header=1)
+        fat_vendas.columns = fat_vendas.columns.astype(str).str.strip()
+        fat_vendas['Origem'] = 'Venda'
+
+        fat_devol = None
+        if aba_devol:
+            try:
+                fat_devol = _ler_aba(aba_devol)
+                fat_devol.columns = fat_devol.columns.astype(str).str.strip()
+                fat_devol['Origem'] = 'Devolucao'
+                # Normalizar nomes para bater com vendas
+                # Devolucoes: DT Digitacao -> Emissao, Documento -> Num. Docto., Pedido de Venda -> No do Pedido
+                if 'Emissao' not in fat_devol.columns:
+                    col_dt = [c for c in fat_devol.columns if 'digitac' in c.lower() or 'emiss' in c.lower()]
+                    if col_dt:
+                        fat_devol.rename(columns={col_dt[0]: 'Emissao'}, inplace=True)
+                if 'Num. Docto.' not in fat_devol.columns and 'Documento' in fat_devol.columns:
+                    fat_devol.rename(columns={'Documento': 'Num. Docto.'}, inplace=True)
+                if 'No do Pedido' not in fat_devol.columns and 'Pedido de Venda' in fat_devol.columns:
+                    fat_devol.rename(columns={'Pedido de Venda': 'No do Pedido'}, inplace=True)
+                # Devolucao Bruta/Liquida -> Faturamento Bruto/Liquido (negativos)
+                if 'Devolucao Bruta' in fat_devol.columns:
+                    fat_devol['Faturamento Bruto'] = -pd.to_numeric(fat_devol['Devolucao Bruta'], errors='coerce').abs()
+                if 'Devolucao Liquida' in fat_devol.columns:
+                    fat_devol['Faturamento Liquido'] = -pd.to_numeric(fat_devol['Devolucao Liquida'], errors='coerce').abs()
+            except Exception:
+                fat_devol = None
+
+        # Unificar vendas + devolucoes
+        if fat_devol is not None and len(fat_devol) > 0:
+            cols_comuns = list(set(fat_vendas.columns) & set(fat_devol.columns))
+            # Garantir que Emissao, Faturamento Bruto/Liquido e chaves estejam
+            for c in ['Emissao', 'Faturamento Bruto', 'Faturamento Liquido', 'Origem']:
+                if c not in cols_comuns and c in fat_vendas.columns and c in fat_devol.columns:
+                    cols_comuns.append(c)
+            fat = pd.concat([fat_vendas, fat_devol], ignore_index=True, sort=False)
+        else:
+            fat = fat_vendas
+
+        fat.columns = fat.columns.astype(str).str.strip()
+
+        # Localizar coluna Emissao (fallback: DT Digitacao)
+        if 'Emissao' not in fat.columns:
+            col_emiss = [c for c in fat.columns if 'emiss' in c.lower() and 'nf' not in c.lower()]
+            if col_emiss:
+                fat.rename(columns={col_emiss[0]: 'Emissao'}, inplace=True)
+            else:
+                col_dt = [c for c in fat.columns if 'digitac' in c.lower()]
+                if col_dt:
+                    fat.rename(columns={col_dt[0]: 'Emissao'}, inplace=True)
         if 'Emissao' not in fat.columns:
             fat['Emissao'] = pd.NaT
         fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
 
+        # Valor Total
         col_vlr = [c for c in fat.columns if 'vlr' in c.lower() and 'total' in c.lower()]
         if col_vlr:
             fat.rename(columns={col_vlr[0]: 'Vlr.Total.Fat'}, inplace=True)
@@ -383,6 +445,8 @@ def carregar_e_processar():
             fat['No do Pedido'] = fat['No do Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
         if 'Num. Docto.' not in fat.columns:
             fat['Num. Docto.'] = ''
+        if 'Origem' not in fat.columns:
+            fat['Origem'] = 'Venda'
         fat['Mes_Faturamento'] = fat['Emissao'].dt.to_period('M').astype(str)
     # Tentar diferentes linhas de header para mata010
     mt = pd.read_excel(arq_estoque)
