@@ -403,15 +403,11 @@ def carregar_e_processar():
                 fat_devol = None
 
         # Unificar vendas + devolucoes
-        if fat_devol is not None and len(fat_devol) > 0:
-            cols_comuns = list(set(fat_vendas.columns) & set(fat_devol.columns))
-            # Garantir que Emissao, Faturamento Bruto/Liquido e chaves estejam
-            for c in ['Emissao', 'Faturamento Bruto', 'Faturamento Liquido', 'Origem']:
-                if c not in cols_comuns and c in fat_vendas.columns and c in fat_devol.columns:
-                    cols_comuns.append(c)
-            fat = pd.concat([fat_vendas, fat_devol], ignore_index=True, sort=False)
-        else:
-            fat = fat_vendas
+        # IMPORTANTE: A aba de Vendas JA INCLUI devolucoes como linhas com valores negativos.
+        # A aba de Devolucoes e redundante - somar resultaria em duplicacao.
+        # Entao usamos APENAS a aba de Vendas. A aba de Devolucoes fica disponivel
+        # apenas para referencia/filtro quando precisar.
+        fat = fat_vendas
 
         fat.columns = fat.columns.astype(str).str.strip()
 
