@@ -1441,17 +1441,49 @@ with tab3:
         if atend_filtro != 'Todos':
             det = det[det['Atendimento_Prazo'] == atend_filtro]
 
-        tab_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
-                   'Quantidade', 'Disponivel', 'Disponivel_Estoque', 'Acao_Necessaria',
+        # Criar coluna SC_ou_OP (SC se existir; senao OP)
+        def sc_ou_op(row):
+            sc = row.get('Numero SC')
+            if pd.notna(sc) and str(sc).strip() not in ('', 'nan'):
+                return f"SC {int(float(sc)) if pd.notna(sc) else ''}"
+            op = row.get('Numero OP')
+            op_fu = row.get('FU_OP_na_SC')
+            for v in (op, op_fu):
+                if pd.notna(v) and str(v).strip() not in ('', 'nan'):
+                    try:
+                        return f"OP {int(float(v))}"
+                    except (ValueError, TypeError):
+                        return f"OP {v}"
+            return ''
+        det['SC_OP'] = det.apply(sc_ou_op, axis=1)
+
+        tab_cols = ['Num. Pedido', 'Razao Social', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
+                   'Quantidade', 'Disponivel', 'Disponivel_Estoque', 'SC_OP', 'Acao_Necessaria',
                    'DT. Fat. Cli', 'Entrega', 'Prazo_Real_Entrega', 'Atendimento_Prazo',
                    'Semana_Entrega', 'Ped Cliente']
         tab_cols = [c for c in tab_cols if c in det.columns]
 
         display_df = det[tab_cols].copy()
+
+        # Formatar datas para dd-mm-yy
+        for col_data in ['DT. Fat. Cli', 'Entrega', 'Prazo_Real_Entrega']:
+            if col_data in display_df.columns:
+                display_df[col_data] = pd.to_datetime(display_df[col_data], errors='coerce').dt.strftime('%d-%m-%y')
+                display_df[col_data] = display_df[col_data].fillna('')
+
+        # Formatar Qtd para inteiro
+        if 'Quantidade' in display_df.columns:
+            display_df['Quantidade'] = pd.to_numeric(display_df['Quantidade'], errors='coerce').apply(
+                lambda x: f"{int(x)}" if pd.notna(x) and x == int(x) else (f"{x:.2f}" if pd.notna(x) else '')
+            )
+
         rename_disp = {
-            'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+            'Num. Pedido': 'PV',
+            'Razao Social': 'Cliente',
+            'Descricao do Produto': 'Descricao',
             'Tipo_Produto': 'Tipo', 'Quantidade': 'Qtd',
             'Disponivel': 'Disponivel?', 'Disponivel_Estoque': 'Estoque',
+            'SC_OP': 'SC / OP',
             'Acao_Necessaria': 'Acao',
             'DT. Fat. Cli': 'Dt.Necessidade Cliente',
             'Entrega': 'Dt.Entrega Adaptada',
