@@ -853,7 +853,7 @@ with st.sidebar:
 
     # Pronto para Fazer
     pronto_opts = sorted(df['Pronto_para_Fazer'].unique())
-    pronto_sel = st.multiselect("Pronto p/ Fazer?", pronto_opts, default=[])
+    pronto_sel = st.multiselect("Disponivel?", pronto_opts, default=[])
 
     st.markdown("---")
 
@@ -1285,17 +1285,20 @@ with tab2:
 # ===== ABA 3: PRONTIDAO =====
 with tab3:
     filtered_t3 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab3_prontidao')
-    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO']
+    abertos = filtered_t3[filtered_t3['Status_Pedido'] == 'EM ABERTO'].copy()
 
-    prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'SIM'])
-    parciais = len(abertos[abertos['Pronto_para_Fazer'].str.contains('PARCIAL', na=False)])
-    nao_prontos = len(abertos[abertos['Pronto_para_Fazer'] == 'NAO'])
+    # Renomear: Pronto_para_Fazer -> Disponivel (apenas para display)
+    abertos['Disponivel'] = abertos['Pronto_para_Fazer']
+
+    disponiveis = len(abertos[abertos['Disponivel'] == 'SIM'])
+    parciais = len(abertos[abertos['Disponivel'].astype(str).str.contains('PARCIAL', na=False)])
+    indisponiveis = len(abertos[abertos['Disponivel'] == 'NAO'])
     erros = len(abertos[abertos['Acao_Necessaria'] == 'ERRO no CADASTRO'])
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(kpi_card(f"{prontos}", "Prontos p/ Fazer", "ok"), unsafe_allow_html=True)
-    c2.markdown(kpi_card(f"{parciais}", "Parcialmente Prontos", "warn"), unsafe_allow_html=True)
-    c3.markdown(kpi_card(f"{nao_prontos}", "Nao Prontos", "alert"), unsafe_allow_html=True)
+    c1.markdown(kpi_card(f"{disponiveis}", "Disponiveis", "ok"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{parciais}", "Parcialmente Disponiveis", "warn"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"{indisponiveis}", "Indisponiveis", "alert"), unsafe_allow_html=True)
     c4.markdown(kpi_card(f"{erros}", "ERROS Cadastro", "alert" if erros > 0 else "ok"), unsafe_allow_html=True)
 
     st.markdown("")
@@ -1304,7 +1307,7 @@ with tab3:
 
     with col1:
         if len(abertos) > 0:
-            pronto_count = abertos['Pronto_para_Fazer'].value_counts().reset_index()
+            pronto_count = abertos['Disponivel'].value_counts().reset_index()
             pronto_count.columns = ['Status', 'Qtd']
             cores_pronto = {
                 'SIM': CORES['verde'], 'NAO': CORES['vermelho'],
@@ -1312,7 +1315,7 @@ with tab3:
                 'PARCIAL - Sem Estoque': '#E67E22'
             }
             fig = px.pie(pronto_count, values='Qtd', names='Status',
-                        title='Distribuicao - Pronto p/ Fazer?',
+                        title='Distribuicao - Disponivel?',
                         color='Status', color_discrete_map=cores_pronto, hole=0.4)
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -1335,19 +1338,128 @@ with tab3:
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # Tabela detalhada
+    # ============================================================
+    # QUADRO DE DATAS POR PV (consolidado)
+    # ============================================================
+    st.markdown("### 📅 Datas por PV")
+    st.caption("Consolidado por PV: data de necessidade do cliente, data de entrega adaptada e prazo prometido")
+
+    if len(abertos) > 0:
+        # Consolidar por PV (uma data por PV - usar primeiro/min)
+        pv_datas = abertos.groupby('Num. Pedido').agg(
+            Ped_Cliente=('Ped Cliente', 'first'),
+            Cliente=('Razao Social', 'first'),
+            DT_Fat_Cli=('DT. Fat. Cli', 'min'),
+            Data_Entrega=('Entrega', 'min') if 'Entrega' in abertos.columns else ('DT. Fat. Cli', 'min'),
+            Prazo_Real=('Prazo_Real_Entrega', 'min'),  # Dt.Confirma > Dt.Pre Entr
+            Qtd_Linhas=('Vlr.Total', 'count'),
+            Valor_Total=('Vlr.Total', 'sum'),
+        ).reset_index()
+
+        # Atendimento de prazo: Prazo_Real <= DT_Fat_Cli (entrega antes ou na data)
+        def calc_atendimento(row):
+            if pd.isna(row['Prazo_Real']) or pd.isna(row['DT_Fat_Cli']):
+                return 'Sem prazo definido'
+            if row['Prazo_Real'] <= row['DT_Fat_Cli']:
+                return 'Dentro do prazo'
+            return 'Fora do prazo'
+        pv_datas['Atendimento_Prazo'] = pv_datas.apply(calc_atendimento, axis=1)
+
+        # KPIs Atendimento de Prazo
+        st.markdown("#### Atendimento do Prazo do Cliente")
+        dentro = (pv_datas['Atendimento_Prazo'] == 'Dentro do prazo').sum()
+        fora = (pv_datas['Atendimento_Prazo'] == 'Fora do prazo').sum()
+        sem_prazo = (pv_datas['Atendimento_Prazo'] == 'Sem prazo definido').sum()
+        com_prazo = dentro + fora
+        pct_dentro = (dentro / com_prazo * 100) if com_prazo > 0 else 0
+        pct_fora = (fora / com_prazo * 100) if com_prazo > 0 else 0
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(kpi_card(f"{len(pv_datas)}", "Total PVs"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"{dentro}", "Dentro do Prazo", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{fora}", "Fora do Prazo", "alert" if fora > 0 else "ok"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{pct_dentro:.0f}% / {pct_fora:.0f}%", "% Dentro / Fora",
+                    "ok" if pct_dentro >= 80 else "warn"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"{sem_prazo}", "Sem Prazo Definido"), unsafe_allow_html=True)
+
+        # Grafico Atendimento de Prazo
+        atend_count = pv_datas['Atendimento_Prazo'].value_counts().reset_index()
+        atend_count.columns = ['Status', 'Qtd']
+        atend_count['Pct'] = (atend_count['Qtd'] / atend_count['Qtd'].sum() * 100).round(1)
+        atend_count['Label'] = atend_count.apply(lambda r: f"{r['Qtd']} ({r['Pct']:.1f}%)", axis=1)
+
+        cores_atend = {
+            'Dentro do prazo': CORES['verde'],
+            'Fora do prazo': CORES['vermelho'],
+            'Sem prazo definido': CORES['cinza'],
+        }
+        fig_atend = px.bar(atend_count, x='Status', y='Qtd',
+                          title='Atendimento de Prazo do Cliente (por PV)',
+                          color='Status', color_discrete_map=cores_atend,
+                          text='Label')
+        fig_atend.update_traces(textposition='outside')
+        fig_atend.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font_color='#E0E0E0', xaxis_title='', yaxis_title='Qtd PVs',
+            height=400, showlegend=False
+        )
+        st.plotly_chart(fig_atend, use_container_width=True)
+
+    # ============================================================
+    # FILTROS INTERATIVOS + TABELA DETALHADA
+    # ============================================================
     st.markdown("### 📋 Detalhes - Pedidos Em Aberto")
 
     if len(abertos) > 0:
-        tab_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
-                   'Quantidade', 'Pronto_para_Fazer', 'Disponivel_Estoque', 'Acao_Necessaria',
-                   'Prazo_Real_Entrega', 'Semana_Entrega', 'Ped Cliente']
-        tab_cols = [c for c in tab_cols if c in abertos.columns]
+        # Filtros interativos
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            disp_opts = ['Todos'] + sorted(abertos['Disponivel'].astype(str).unique().tolist())
+            disp_filtro = st.selectbox("Filtrar por Disponibilidade", disp_opts, key='disp_filtro')
+        with col_f2:
+            tipo_opts = ['Todos'] + sorted(abertos['Tipo_Produto'].astype(str).unique().tolist())
+            tipo_filtro = st.selectbox("Filtrar por Tipo Produto", tipo_opts, key='tipo_filtro')
+        with col_f3:
+            atend_opts = ['Todos', 'Dentro do prazo', 'Fora do prazo', 'Sem prazo definido']
+            atend_filtro = st.selectbox("Filtrar por Atendimento Prazo", atend_opts, key='atend_filtro')
 
-        display_df = abertos[tab_cols].copy()
-        display_df.columns = ['PV', 'Item', 'Produto', 'Descricao', 'Tipo',
-                             'Qtd', 'Pronto?', 'Estoque', 'Acao',
-                             'Prazo Entrega', 'Semana', 'Ped Cliente'][:len(tab_cols)]
+        # Aplicar filtros
+        det = abertos.copy()
+        # Adicionar atendimento de prazo a cada linha (vindo do PV)
+        if 'pv_datas' in dir():
+            det = det.merge(
+                pv_datas[['Num. Pedido', 'Atendimento_Prazo']],
+                on='Num. Pedido', how='left'
+            )
+        else:
+            det['Atendimento_Prazo'] = 'Sem prazo definido'
+
+        if disp_filtro != 'Todos':
+            det = det[det['Disponivel'].astype(str) == disp_filtro]
+        if tipo_filtro != 'Todos':
+            det = det[det['Tipo_Produto'].astype(str) == tipo_filtro]
+        if atend_filtro != 'Todos':
+            det = det[det['Atendimento_Prazo'] == atend_filtro]
+
+        tab_cols = ['Num. Pedido', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
+                   'Quantidade', 'Disponivel', 'Disponivel_Estoque', 'Acao_Necessaria',
+                   'DT. Fat. Cli', 'Entrega', 'Prazo_Real_Entrega', 'Atendimento_Prazo',
+                   'Semana_Entrega', 'Ped Cliente']
+        tab_cols = [c for c in tab_cols if c in det.columns]
+
+        display_df = det[tab_cols].copy()
+        rename_disp = {
+            'Num. Pedido': 'PV', 'Descricao do Produto': 'Descricao',
+            'Tipo_Produto': 'Tipo', 'Quantidade': 'Qtd',
+            'Disponivel': 'Disponivel?', 'Disponivel_Estoque': 'Estoque',
+            'Acao_Necessaria': 'Acao',
+            'DT. Fat. Cli': 'Dt.Necessidade Cliente',
+            'Entrega': 'Dt.Entrega Adaptada',
+            'Prazo_Real_Entrega': 'Prazo Entrega',
+            'Atendimento_Prazo': 'Atendimento Prazo',
+            'Semana_Entrega': 'Semana',
+        }
+        display_df = display_df.rename(columns=rename_disp)
 
         def color_pronto(val):
             if val == 'SIM': return 'background-color: #1a3a1a; color: #2ECC71'
@@ -1362,10 +1474,20 @@ with tab3:
             elif 'gerada' in str(val): return 'background-color: #3a3a1a; color: #F39C12'
             return ''
 
-        styled = display_df.style.applymap(color_pronto, subset=['Pronto?'] if 'Pronto?' in display_df.columns else [])
+        def color_atend(val):
+            if val == 'Dentro do prazo': return 'background-color: #1a3a1a; color: #2ECC71'
+            elif val == 'Fora do prazo': return 'background-color: #3a1a1a; color: #E74C3C'
+            return ''
+
+        styled = display_df.style
+        if 'Disponivel?' in display_df.columns:
+            styled = styled.applymap(color_pronto, subset=['Disponivel?'])
         if 'Acao' in display_df.columns:
             styled = styled.applymap(color_acao, subset=['Acao'])
+        if 'Atendimento Prazo' in display_df.columns:
+            styled = styled.applymap(color_atend, subset=['Atendimento Prazo'])
 
+        st.caption(f"Mostrando {len(display_df)} de {len(abertos)} linhas")
         st.dataframe(styled, use_container_width=True, height=500)
     else:
         st.info("Nenhum pedido em aberto com os filtros selecionados.")
