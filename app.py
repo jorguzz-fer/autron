@@ -336,7 +336,7 @@ def carregar_e_processar():
 
     for arq in [arq_entrada, arq_followup, arq_estoque, arq_sciozmq]:
         if not os.path.exists(arq):
-            return None, None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
+            return None, None, None, None, f"Arquivo nao encontrado: {os.path.basename(arq)}"
 
     # Carregar
     ep = pd.read_excel(arq_entrada, header=1)
@@ -649,7 +649,34 @@ def carregar_e_processar():
             'Meta_Entrada_Ergomec': meta_entrada_ergomec,
         })
 
-    return merged, fat, budget, None
+    # --- Ganhas (Plumes / CRM) ---
+    ganhas = None
+    arq_ganhas = resolver_arquivo("Ganhas.xlsx")
+    if os.path.exists(arq_ganhas):
+        try:
+            ganhas = pd.read_excel(arq_ganhas, header=0)
+            ganhas.columns = ganhas.columns.astype(str).str.strip()
+            # Normalizar colunas principais
+            if 'Valor' in ganhas.columns:
+                ganhas['Valor'] = pd.to_numeric(ganhas['Valor'], errors='coerce')
+            if 'Término' in ganhas.columns:
+                ganhas['Termino'] = pd.to_datetime(ganhas['Término'], errors='coerce')
+            elif 'Termino' in ganhas.columns:
+                ganhas['Termino'] = pd.to_datetime(ganhas['Termino'], errors='coerce')
+            if 'Data Ganho' in ganhas.columns:
+                ganhas['Data_Ganho'] = pd.to_datetime(ganhas['Data Ganho'], errors='coerce')
+            # Data referencia: Data Ganho > Termino
+            ganhas['Data_Ref'] = ganhas.get('Data_Ganho', pd.NaT).combine_first(ganhas.get('Termino', pd.NaT)) if 'Data_Ganho' in ganhas.columns else ganhas.get('Termino', pd.NaT)
+            ganhas['Mes_Plumes'] = ganhas['Data_Ref'].dt.to_period('M').astype(str)
+            # Normalizar Ped Cliente para match
+            if 'Número do Pedido de Compra do cliente' in ganhas.columns:
+                ganhas['Ped_Cliente_Norm'] = ganhas['Número do Pedido de Compra do cliente'].astype(str).str.strip().str.upper().replace('NAN', None)
+            else:
+                ganhas['Ped_Cliente_Norm'] = None
+        except Exception:
+            ganhas = None
+
+    return merged, fat, budget, ganhas, None
 
 
 # ========================================================================
@@ -778,7 +805,7 @@ if len(ausentes) > 0:
 # ========================================================================
 # CARREGAR DADOS
 # ========================================================================
-df, df_fat, df_budget, erro = carregar_e_processar()
+df, df_fat, df_budget, df_ganhas, erro = carregar_e_processar()
 
 if erro:
     st.error(f"Erro ao carregar dados: {erro}")
@@ -1017,9 +1044,10 @@ st.markdown(f"<p style='color: #888;'>Dados filtrados: {len(filtered):,} linhas 
 # ========================================================================
 # ABAS PRINCIPAIS
 # ========================================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Visao Geral", "📋 Entrada de Pedidos", "✅ Prontidao", "📅 Previsao Entrega",
-    "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao Faturamento"
+    "📦 Estoque & SC/OP", "💰 Faturamento", "📈 Previsao Faturamento",
+    "🔀 Comparativo Plumes"
 ])
 
 
@@ -1924,3 +1952,193 @@ with tab7:
         st.dataframe(prev_display, use_container_width=True, height=300)
     else:
         st.info("Nenhum pedido em aberto com os filtros selecionados.")
+
+
+# ===== ABA 8: COMPARATIVO PLUMES =====
+with tab8:
+    st.markdown("### 🔀 Comparativo Plumes (CRM) x Proteus (ERP)")
+    st.caption("Compara pedidos do Plumes (Ganhas.xlsx) com os do Proteus (entrada_pedido.xlsx) - match por **Ped. Cliente**")
+
+    if df_ganhas is None or len(df_ganhas) == 0:
+        st.warning("Arquivo Ganhas.xlsx nao carregado.")
+    else:
+        # --- Preparar dados ---
+        # Plumes: agregar por Ped Cliente (alguns tem multiplas linhas)
+        plumes = df_ganhas[df_ganhas['Ped_Cliente_Norm'].notna()].copy()
+        plumes_agg = plumes.groupby('Ped_Cliente_Norm').agg(
+            Valor_Plumes=('Valor', 'sum'),
+            Data_Plumes=('Data_Ref', 'min'),
+            Cliente_Plumes=('Cliente', 'first'),
+            Titulo=('Título', 'first'),
+        ).reset_index()
+        plumes_agg['Mes_Plumes'] = plumes_agg['Data_Plumes'].dt.to_period('M').astype(str)
+
+        # Proteus: agregar Vlr.Total por PV/Ped Cliente
+        proteus = df.copy()
+        proteus['Ped_Cliente_Norm'] = proteus['Ped Cliente'].astype(str).str.strip().str.upper().replace('NAN', None)
+        proteus_agg = proteus[proteus['Ped_Cliente_Norm'].notna()].groupby('Ped_Cliente_Norm').agg(
+            Valor_Proteus=('Vlr.Total', 'sum'),
+            Data_Proteus=('DT Emissao', 'min'),
+            Num_PV=('Num. Pedido', 'first'),
+            Cliente_Proteus=('Razao Social', 'first'),
+        ).reset_index()
+        proteus_agg['Mes_Proteus'] = proteus_agg['Data_Proteus'].dt.to_period('M').astype(str)
+
+        # Merge outer
+        comp = plumes_agg.merge(proteus_agg, on='Ped_Cliente_Norm', how='outer')
+
+        # Status da comparacao
+        def status(row):
+            if pd.isna(row.get('Valor_Plumes')):
+                return 'Só no Proteus'
+            if pd.isna(row.get('Valor_Proteus')):
+                return 'Só no Plumes'
+            v_p = row['Valor_Plumes']
+            v_pr = row['Valor_Proteus']
+            m_p = row['Mes_Plumes']
+            m_pr = row['Mes_Proteus']
+            tol = 0.01
+            valor_ok = abs(v_p - v_pr) <= max(tol, abs(v_p) * 0.001)
+            mes_ok = (pd.notna(m_p) and pd.notna(m_pr) and m_p == m_pr)
+            if valor_ok and mes_ok:
+                return 'OK'
+            if not valor_ok and not mes_ok:
+                return 'Valor e Mes Diferentes'
+            if not valor_ok:
+                return 'Valor Diferente'
+            return 'Mes Diferente'
+        comp['Status'] = comp.apply(status, axis=1)
+
+        # Diferencas
+        comp['Diferenca_Valor'] = comp['Valor_Plumes'].fillna(0) - comp['Valor_Proteus'].fillna(0)
+        comp['Diferenca_Pct'] = np.where(
+            comp['Valor_Proteus'].fillna(0) != 0,
+            (comp['Diferenca_Valor'] / comp['Valor_Proteus'] * 100), np.nan
+        )
+
+        # --- Filtro de data ---
+        comp['Data_Filtro'] = comp['Data_Plumes'].combine_first(comp['Data_Proteus'])
+        datas_validas = comp['Data_Filtro'].dropna()
+        if len(datas_validas) > 0:
+            data_min = datas_validas.min().date()
+            data_max = datas_validas.max().date()
+            col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+            with col_f1:
+                dt_ini = st.date_input("De", value=data_min, min_value=data_min,
+                                      max_value=data_max, key='dt_ini_tab8', format="DD/MM/YYYY")
+            with col_f2:
+                dt_fim = st.date_input("Ate", value=data_max, min_value=data_min,
+                                      max_value=data_max, key='dt_fim_tab8', format="DD/MM/YYYY")
+            dt_ini_ts = pd.Timestamp(dt_ini)
+            dt_fim_ts = pd.Timestamp(dt_fim) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            mask = (comp['Data_Filtro'] >= dt_ini_ts) & (comp['Data_Filtro'] <= dt_fim_ts)
+            mask = mask | comp['Data_Filtro'].isna()
+            comp_f = comp[mask].copy()
+        else:
+            comp_f = comp.copy()
+
+        # --- KPIs ---
+        total_ped = len(comp_f)
+        ok_count = (comp_f['Status'] == 'OK').sum()
+        val_dif = (comp_f['Status'] == 'Valor Diferente').sum()
+        mes_dif = (comp_f['Status'] == 'Mes Diferente').sum()
+        ambos_dif = (comp_f['Status'] == 'Valor e Mes Diferentes').sum()
+        so_plumes = (comp_f['Status'] == 'Só no Plumes').sum()
+        so_proteus = (comp_f['Status'] == 'Só no Proteus').sum()
+
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.markdown(kpi_card(f"{total_ped}", "Total Pedidos"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"{ok_count}", "OK (Match)", "ok"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"{val_dif + ambos_dif}", "Valor Diferente", "warn" if val_dif + ambos_dif > 0 else "ok"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"{mes_dif + ambos_dif}", "Mes Diferente", "warn" if mes_dif + ambos_dif > 0 else "ok"), unsafe_allow_html=True)
+        c5.markdown(kpi_card(f"{so_plumes}", "Só Plumes", "alert" if so_plumes > 0 else "ok"), unsafe_allow_html=True)
+        c6.markdown(kpi_card(f"{so_proteus}", "Só Proteus", "alert" if so_proteus > 0 else "ok"), unsafe_allow_html=True)
+
+        st.markdown("")
+
+        # --- Grafico status ---
+        col1, col2 = st.columns(2)
+        with col1:
+            status_count = comp_f['Status'].value_counts().reset_index()
+            status_count.columns = ['Status', 'Qtd']
+            cores_status = {
+                'OK': CORES['verde'],
+                'Valor Diferente': CORES['amarelo'],
+                'Mes Diferente': '#E67E22',
+                'Valor e Mes Diferentes': CORES['vermelho'],
+                'Só no Plumes': '#9B59B6',
+                'Só no Proteus': '#3498DB',
+            }
+            fig_status = px.pie(status_count, values='Qtd', names='Status',
+                               title='Distribuicao por Status',
+                               color='Status', color_discrete_map=cores_status, hole=0.4)
+            fig_status.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', height=400)
+            st.plotly_chart(fig_status, use_container_width=True)
+
+        with col2:
+            # Diferenca total de valor por status
+            dif_por_status = comp_f.groupby('Status').agg(
+                Diferenca=('Diferenca_Valor', 'sum'),
+                Qtd=('Ped_Cliente_Norm', 'count')
+            ).reset_index()
+            fig_dif = px.bar(dif_por_status, x='Status', y='Diferenca',
+                            title='Diferenca Total de Valor (Plumes - Proteus)',
+                            color='Status', color_discrete_map=cores_status)
+            fig_dif.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', height=400, showlegend=False,
+                xaxis_title='', yaxis_title='R$')
+            st.plotly_chart(fig_dif, use_container_width=True)
+
+        # --- Tabela detalhada ---
+        st.markdown("### 📋 Detalhe do Comparativo")
+
+        filtro_status = st.multiselect(
+            "Filtrar por Status",
+            options=sorted(comp_f['Status'].unique()),
+            default=[s for s in ['Valor Diferente', 'Mes Diferente', 'Valor e Mes Diferentes',
+                                 'Só no Plumes', 'Só no Proteus'] if s in comp_f['Status'].unique()]
+        )
+        if filtro_status:
+            comp_show = comp_f[comp_f['Status'].isin(filtro_status)].copy()
+        else:
+            comp_show = comp_f.copy()
+
+        cols_show = ['Ped_Cliente_Norm', 'Num_PV', 'Cliente_Proteus', 'Cliente_Plumes',
+                    'Valor_Plumes', 'Valor_Proteus', 'Diferenca_Valor', 'Diferenca_Pct',
+                    'Mes_Plumes', 'Mes_Proteus', 'Data_Plumes', 'Data_Proteus',
+                    'Titulo', 'Status']
+        cols_show = [c for c in cols_show if c in comp_show.columns]
+        comp_display = comp_show[cols_show].copy()
+
+        rename_map = {
+            'Ped_Cliente_Norm': 'Ped.Cliente',
+            'Num_PV': 'PV',
+            'Cliente_Proteus': 'Cliente (Proteus)',
+            'Cliente_Plumes': 'Cliente (Plumes)',
+            'Valor_Plumes': 'Valor Plumes',
+            'Valor_Proteus': 'Valor Proteus',
+            'Diferenca_Valor': 'Dif. R$',
+            'Diferenca_Pct': 'Dif. %',
+            'Mes_Plumes': 'Mes Plumes',
+            'Mes_Proteus': 'Mes Proteus',
+            'Data_Plumes': 'Data Plumes',
+            'Data_Proteus': 'Data Proteus',
+        }
+        comp_display = comp_display.rename(columns=rename_map)
+
+        def color_status(val):
+            if val == 'OK': return 'background-color: #1a3a1a; color: #2ECC71'
+            if val in ('Valor Diferente', 'Mes Diferente'): return 'background-color: #3a3a1a; color: #F39C12'
+            if val == 'Valor e Mes Diferentes': return 'background-color: #3a1a1a; color: #E74C3C'
+            if val == 'Só no Plumes': return 'background-color: #2c1e3a; color: #9B59B6'
+            if val == 'Só no Proteus': return 'background-color: #1a2c3a; color: #3498DB'
+            return ''
+
+        styled = comp_display.style
+        if 'Status' in comp_display.columns:
+            styled = styled.applymap(color_status, subset=['Status'])
+
+        st.dataframe(styled, use_container_width=True, height=500)
