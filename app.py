@@ -344,17 +344,45 @@ def carregar_e_processar():
     # Faturamento (opcional - pode nao existir)
     fat = None
     if os.path.exists(arq_faturamento):
-        fat = pd.read_excel(arq_faturamento, header=1)
+        # Tentar diferentes linhas de header ate achar a coluna Emissao
+        fat = None
+        for h in [1, 0, 2]:
+            try:
+                tmp = pd.read_excel(arq_faturamento, header=h)
+                tmp.columns = tmp.columns.astype(str).str.strip()
+                if any('emiss' in c.lower() for c in tmp.columns):
+                    fat = tmp
+                    break
+            except Exception:
+                continue
+        if fat is None:
+            fat = pd.read_excel(arq_faturamento, header=1)
+            fat.columns = fat.columns.astype(str).str.strip()
+
+        # Localizar coluna Emissao
+        col_emiss = [c for c in fat.columns if 'emiss' in c.lower() and 'nf' not in c.lower()]
+        if col_emiss:
+            fat.rename(columns={col_emiss[0]: 'Emissao'}, inplace=True)
+        if 'Emissao' not in fat.columns:
+            fat['Emissao'] = pd.NaT
         fat['Emissao'] = pd.to_datetime(fat['Emissao'], errors='coerce')
+
         col_vlr = [c for c in fat.columns if 'vlr' in c.lower() and 'total' in c.lower()]
         if col_vlr:
             fat.rename(columns={col_vlr[0]: 'Vlr.Total.Fat'}, inplace=True)
         else:
             fat['Vlr.Total.Fat'] = 0
         fat['Vlr.Total.Fat'] = pd.to_numeric(fat['Vlr.Total.Fat'], errors='coerce')
-        fat['Faturamento Bruto'] = pd.to_numeric(fat.get('Faturamento Bruto', 0), errors='coerce')
-        fat['Faturamento Liquido'] = pd.to_numeric(fat.get('Faturamento Liquido', 0), errors='coerce')
-        fat['No do Pedido'] = fat['No do Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
+        if 'Faturamento Bruto' not in fat.columns:
+            fat['Faturamento Bruto'] = 0
+        if 'Faturamento Liquido' not in fat.columns:
+            fat['Faturamento Liquido'] = 0
+        fat['Faturamento Bruto'] = pd.to_numeric(fat['Faturamento Bruto'], errors='coerce')
+        fat['Faturamento Liquido'] = pd.to_numeric(fat['Faturamento Liquido'], errors='coerce')
+        if 'No do Pedido' in fat.columns:
+            fat['No do Pedido'] = fat['No do Pedido'].astype(str).str.replace('.', '', regex=False).str.strip()
+        if 'Num. Docto.' not in fat.columns:
+            fat['Num. Docto.'] = ''
         fat['Mes_Faturamento'] = fat['Emissao'].dt.to_period('M').astype(str)
     # Tentar diferentes linhas de header para mata010
     mt = pd.read_excel(arq_estoque)
