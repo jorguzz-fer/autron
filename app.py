@@ -246,6 +246,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def fmt_br(valor, decimais=0):
+    """Formata numero em padrao BR: 11.251,00 (ponto milhar, virgula decimal)."""
+    if valor is None or (isinstance(valor, float) and (pd.isna(valor))):
+        return ""
+    try:
+        s = f"{valor:,.{decimais}f}"
+        # Trocar: , (milhar EN) -> X, . (decimal EN) -> ,, X -> .
+        return s.replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return str(valor)
+
+
+def fmt_br_signed(valor, decimais=0):
+    """Formata numero em padrao BR com sinal explicito: +11.251,00 ou -11.251,00."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    sinal = "+" if valor >= 0 else "-"
+    return sinal + fmt_br(abs(valor), decimais)
+
+
 def kpi_card(valor, label, tipo="normal"):
     css_class = {
         "normal": ("kpi-card", "kpi-value"),
@@ -1017,13 +1037,13 @@ with st.sidebar:
 
         resumo_mes = pd.DataFrame([
             {'Indicador': 'Mes Referencia', 'Valor': mes_atual_period},
-            {'Indicador': 'Valor Faturado (Total)', 'Valor': f"R$ {valor_faturado:,.2f}"},
-            {'Indicador': 'Faturamento Bruto', 'Valor': f"R$ {valor_fat_bruto:,.2f}"},
-            {'Indicador': 'Faturamento Liquido', 'Valor': f"R$ {valor_fat_liquido:,.2f}"},
+            {'Indicador': 'Valor Faturado (Total)', 'Valor': f"R$ {fmt_br(valor_faturado, 2)}"},
+            {'Indicador': 'Faturamento Bruto', 'Valor': f"R$ {fmt_br(valor_fat_bruto, 2)}"},
+            {'Indicador': 'Faturamento Liquido', 'Valor': f"R$ {fmt_br(valor_fat_liquido, 2)}"},
             {'Indicador': 'Qtd NFs Emitidas', 'Valor': str(qtd_nfs)},
-            {'Indicador': 'Valor a Faturar (Previsao)', 'Valor': f"R$ {valor_a_faturar:,.2f}"},
+            {'Indicador': 'Valor a Faturar (Previsao)', 'Valor': f"R$ {fmt_br(valor_a_faturar, 2)}"},
             {'Indicador': 'Qtd PVs a Faturar', 'Valor': str(qtd_pvs_a_fat)},
-            {'Indicador': 'Total Previsto no Mes', 'Valor': f"R$ {valor_faturado + valor_a_faturar:,.2f}"},
+            {'Indicador': 'Total Previsto no Mes', 'Valor': f"R$ {fmt_br(valor_faturado + valor_a_faturar, 2)}"},
         ])
 
         # --- 6) Detalhe A Faturar Mes ---
@@ -1129,7 +1149,7 @@ with tab1:
     c2.markdown(kpi_card(f"{total_linhas:,}", "Total Linhas"), unsafe_allow_html=True)
     c3.markdown(kpi_card(f"{em_aberto}", "Em Aberto", "alert"), unsafe_allow_html=True)
     c4.markdown(kpi_card(f"{finalizados}", "Finalizados", "ok"), unsafe_allow_html=True)
-    c5.markdown(kpi_card(f"R$ {valor_aberto:,.0f}", "Valor Em Aberto", "warn"), unsafe_allow_html=True)
+    c5.markdown(kpi_card(f"R$ {fmt_br(valor_aberto, 0)}", "Valor Em Aberto", "warn"), unsafe_allow_html=True)
     c6.markdown(kpi_card(f"{pct:.1f}%", "% Conclusao", "ok" if pct > 80 else "warn"), unsafe_allow_html=True)
 
     st.markdown("")
@@ -1207,9 +1227,9 @@ with tab2:
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.markdown(kpi_card(f"{total_pvs_ep}", "Total PVs"), unsafe_allow_html=True)
     c2.markdown(kpi_card(f"{total_ep:,}", "Total Linhas"), unsafe_allow_html=True)
-    c3.markdown(kpi_card(f"R$ {valor_total_ep:,.0f}", "Valor Total"), unsafe_allow_html=True)
-    c4.markdown(kpi_card(f"R$ {valor_2026:,.0f}", "Valor 2026"), unsafe_allow_html=True)
-    c5.markdown(kpi_card(f"R$ {meta_entrada_grupo:,.0f}", "Meta 2026 Grupo"), unsafe_allow_html=True)
+    c3.markdown(kpi_card(f"R$ {fmt_br(valor_total_ep, 0)}", "Valor Total"), unsafe_allow_html=True)
+    c4.markdown(kpi_card(f"R$ {fmt_br(valor_2026, 0)}", "Valor 2026"), unsafe_allow_html=True)
+    c5.markdown(kpi_card(f"R$ {fmt_br(meta_entrada_grupo, 0)}", "Meta 2026 Grupo"), unsafe_allow_html=True)
 
     st.markdown("")
 
@@ -1274,8 +1294,8 @@ with tab2:
             st.plotly_chart(fig_comp_ent, use_container_width=True)
         with col2:
             comp_ent_display = comp_ent.copy()
-            comp_ent_display['Meta'] = comp_ent_display['Meta'].apply(lambda x: f"R$ {x:,.0f}")
-            comp_ent_display['Realizado'] = comp_ent_display['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            comp_ent_display['Meta'] = comp_ent_display['Meta'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            comp_ent_display['Realizado'] = comp_ent_display['Realizado'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
             comp_ent_display['Ating. %'] = comp_ent_display['Ating. %'].apply(lambda x: f"{x:.1f}%")
             st.dataframe(comp_ent_display, use_container_width=True, height=400)
 
@@ -1305,8 +1325,8 @@ with tab2:
             st.plotly_chart(fig_a, use_container_width=True)
         with col2:
             ca_d = comp_autron.copy()
-            ca_d['Meta'] = ca_d['Meta'].apply(lambda x: f"R$ {x:,.0f}")
-            ca_d['Realizado'] = ca_d['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            ca_d['Meta'] = ca_d['Meta'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            ca_d['Realizado'] = ca_d['Realizado'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
             ca_d['Ating. %'] = ca_d['Ating. %'].apply(lambda x: f"{x:.1f}%")
             st.dataframe(ca_d, use_container_width=True, height=350)
 
@@ -1336,8 +1356,8 @@ with tab2:
             st.plotly_chart(fig_e, use_container_width=True)
         with col2:
             ce_d = comp_ergomec.copy()
-            ce_d['Meta'] = ce_d['Meta'].apply(lambda x: f"R$ {x:,.0f}")
-            ce_d['Realizado'] = ce_d['Realizado'].apply(lambda x: f"R$ {x:,.0f}")
+            ce_d['Meta'] = ce_d['Meta'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            ce_d['Realizado'] = ce_d['Realizado'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
             ce_d['Ating. %'] = ce_d['Ating. %'].apply(lambda x: f"{x:.1f}%")
             st.dataframe(ce_d, use_container_width=True, height=350)
 
@@ -1555,7 +1575,7 @@ with tab3:
         # Formatar Vlr.Total como moeda
         if 'Vlr.Total' in display_df.columns:
             display_df['Vlr.Total'] = pd.to_numeric(display_df['Vlr.Total'], errors='coerce').apply(
-                lambda x: f"R$ {x:,.2f}" if pd.notna(x) else ''
+                lambda x: f"R$ {fmt_br(x, 2)}" if pd.notna(x) else ''
             )
 
         rename_disp = {
@@ -1871,12 +1891,12 @@ with tab6:
             ult = ult.iloc[0]
             st.markdown(f"#### Resultado {mes_anterior}")
             c1, c2, c3, c4 = st.columns(4)
-            c1.markdown(kpi_card(f"R$ {ult['Receita_Liquida_Meta']:,.0f}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
-            c2.markdown(kpi_card(f"R$ {ult['Fat_Liquido']:,.0f}", "Fat. Líquido",
+            c1.markdown(kpi_card(f"R$ {fmt_br(ult['Receita_Liquida_Meta'], 0)}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {fmt_br(ult['Fat_Liquido'], 0)}", "Fat. Líquido",
                         "ok" if ult['Fat_Liquido'] >= ult['Receita_Liquida_Meta'] else "warn"), unsafe_allow_html=True)
             c3.markdown(kpi_card(f"{ult['Ating_Pct']:.0f}%", "Atingimento",
                         "ok" if ult['Ating_Pct'] >= 100 else ("warn" if ult['Ating_Pct'] >= 80 else "alert")), unsafe_allow_html=True)
-            c4.markdown(kpi_card(f"R$ {ult['Diferenca_Meta']:+,.0f}", "Diferenca",
+            c4.markdown(kpi_card(f"R$ {fmt_br_signed(ult['Diferenca_Meta'], 0)}", "Diferenca",
                         "ok" if ult['Diferenca_Meta'] >= 0 else "alert"), unsafe_allow_html=True)
 
         # --- KPIs do mes atual com Total Liquido Projetado ---
@@ -1886,10 +1906,10 @@ with tab6:
             total_liq_proj = atual['Fat_Liquido'] + atual['Total_Liq_a_Faturar']
             st.markdown(f"#### Resultado {mes_atual_str}")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.markdown(kpi_card(f"R$ {atual['Receita_Liquida_Meta']:,.0f}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
-            c2.markdown(kpi_card(f"R$ {atual['Fat_Liquido']:,.0f}", "Fat. Líquido Atual"), unsafe_allow_html=True)
-            c3.markdown(kpi_card(f"R$ {atual['Total_Liq_a_Faturar']:,.0f}", "Líq. a Faturar (-17%)"), unsafe_allow_html=True)
-            c4.markdown(kpi_card(f"R$ {total_liq_proj:,.0f}", "Total Líquido Projetado", "ok" if total_liq_proj >= atual['Receita_Liquida_Meta'] else "warn"), unsafe_allow_html=True)
+            c1.markdown(kpi_card(f"R$ {fmt_br(atual['Receita_Liquida_Meta'], 0)}", "Meta (Rec. Líquida)"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {fmt_br(atual['Fat_Liquido'], 0)}", "Fat. Líquido Atual"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"R$ {fmt_br(atual['Total_Liq_a_Faturar'], 0)}", "Líq. a Faturar (-17%)"), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {fmt_br(total_liq_proj, 0)}", "Total Líquido Projetado", "ok" if total_liq_proj >= atual['Receita_Liquida_Meta'] else "warn"), unsafe_allow_html=True)
             ating_atual = (total_liq_proj / atual['Receita_Liquida_Meta'] * 100) if atual['Receita_Liquida_Meta'] > 0 else 0
             c5.markdown(kpi_card(f"{ating_atual:.0f}%", "Atingimento Projetado",
                         "ok" if ating_atual >= 100 else ("warn" if ating_atual >= 80 else "alert")), unsafe_allow_html=True)
@@ -1908,10 +1928,10 @@ with tab6:
 
         st.markdown("#### Consolidado Q1")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card(f"R$ {meta_q1:,.0f}", "Meta Q1"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {fat_liq_q1:,.0f}", "Fat. Líquido Q1"), unsafe_allow_html=True)
-        c3.markdown(kpi_card(f"R$ {total_liq_q1:,.0f}", "Total Líquido Q1"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"R$ {diff_q1:+,.0f}", "Diferenca",
+        c1.markdown(kpi_card(f"R$ {fmt_br(meta_q1, 0)}", "Meta Q1"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fmt_br(fat_liq_q1, 0)}", "Fat. Líquido Q1"), unsafe_allow_html=True)
+        c3.markdown(kpi_card(f"R$ {fmt_br(total_liq_q1, 0)}", "Total Líquido Q1"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {fmt_br_signed(diff_q1, 0)}", "Diferenca",
                     "ok" if diff_q1 >= 0 else "alert"), unsafe_allow_html=True)
         c5.markdown(kpi_card(f"{ating_q1:.0f}%", "Atingimento",
                     "ok" if ating_q1 >= 100 else ("warn" if ating_q1 >= 80 else "alert")), unsafe_allow_html=True)
@@ -1928,10 +1948,10 @@ with tab6:
 
             st.markdown(f"#### Consolidado {tri_atual}")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.markdown(kpi_card(f"R$ {meta_tri:,.0f}", f"Meta {tri_atual}"), unsafe_allow_html=True)
-            c2.markdown(kpi_card(f"R$ {fat_liq_tri:,.0f}", "Fat. Líquido"), unsafe_allow_html=True)
-            c3.markdown(kpi_card(f"R$ {total_liq_tri:,.0f}", f"Total Líquido {tri_atual}"), unsafe_allow_html=True)
-            c4.markdown(kpi_card(f"R$ {diff_tri:+,.0f}", "Diferenca",
+            c1.markdown(kpi_card(f"R$ {fmt_br(meta_tri, 0)}", f"Meta {tri_atual}"), unsafe_allow_html=True)
+            c2.markdown(kpi_card(f"R$ {fmt_br(fat_liq_tri, 0)}", "Fat. Líquido"), unsafe_allow_html=True)
+            c3.markdown(kpi_card(f"R$ {fmt_br(total_liq_tri, 0)}", f"Total Líquido {tri_atual}"), unsafe_allow_html=True)
+            c4.markdown(kpi_card(f"R$ {fmt_br_signed(diff_tri, 0)}", "Diferenca",
                         "ok" if diff_tri >= 0 else "alert"), unsafe_allow_html=True)
             c5.markdown(kpi_card(f"{ating_tri:.0f}%", "Atingimento",
                         "ok" if ating_tri >= 100 else ("warn" if ating_tri >= 80 else "alert")), unsafe_allow_html=True)
@@ -1945,8 +1965,8 @@ with tab6:
 
         st.markdown("#### Total de Carteira")
         c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(kpi_card(f"R$ {carteira_bruto:,.0f}", "Valor Bruto"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {carteira_liquido:,.0f}", "Valor Líquido (-17%)"), unsafe_allow_html=True)
+        c1.markdown(kpi_card(f"R$ {fmt_br(carteira_bruto, 0)}", "Valor Bruto"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fmt_br(carteira_liquido, 0)}", "Valor Líquido (-17%)"), unsafe_allow_html=True)
         c3.markdown(kpi_card(f"{carteira_pvs}", "PVs em Aberto"), unsafe_allow_html=True)
         c4.markdown(kpi_card(f"{carteira_linhas}", "Linhas em Aberto"), unsafe_allow_html=True)
 
@@ -1978,14 +1998,14 @@ with tab6:
         fig_anos.add_trace(go.Bar(
             x=comp_ano['Mes'], y=comp_ano['2025'], name='2025',
             marker_color='#4472C4',
-            text=comp_ano['2025'].apply(lambda x: f"R$ {x:,.0f}".replace(',', '.') if x > 0 else ''),
+            text=comp_ano['2025'].apply(lambda x: f"R$ {fmt_br(x, 0)}" if x > 0 else ''),
             textposition='outside', textfont=dict(size=10, color='#4472C4'),
         ))
         fig_anos.add_trace(go.Bar(
             x=comp_ano['Mes'], y=comp_ano['2026'], name='2026',
             marker_color='#70AD47',
             text=comp_ano.apply(
-                lambda r: f"R$ {r['2026']:,.0f}".replace(',', '.') +
+                lambda r: f"R$ {fmt_br(r['2026'], 0)}" +
                           (f"<br>{r['Diferenca_Pct']:+.1f}%" if pd.notna(r['Diferenca_Pct']) and r['2026'] > 0 else '')
                 if r['2026'] > 0 else '', axis=1
             ),
@@ -2007,8 +2027,8 @@ with tab6:
         total_26 = comp_ano['2026'].sum()
         diff_total = ((total_26 - total_25) / total_25 * 100) if total_25 > 0 else 0
         c1, c2, c3 = st.columns(3)
-        c1.markdown(kpi_card(f"R$ {total_25:,.0f}", "Total 2025"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {total_26:,.0f}", "Total 2026"), unsafe_allow_html=True)
+        c1.markdown(kpi_card(f"R$ {fmt_br(total_25, 0)}", "Total 2025"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fmt_br(total_26, 0)}", "Total 2026"), unsafe_allow_html=True)
         c3.markdown(kpi_card(f"{diff_total:+.1f}%", "Variacao", "ok" if diff_total >= 0 else "alert"), unsafe_allow_html=True)
 
         st.markdown("")
@@ -2045,7 +2065,7 @@ with tab6:
                 elif val == 0:
                     quadro_fmt.at[idx, col] = "-"
                 else:
-                    quadro_fmt.at[idx, col] = f"R$ {val:,.0f}"
+                    quadro_fmt.at[idx, col] = f"R$ {fmt_br(val, 0)}"
 
         st.dataframe(quadro_fmt, use_container_width=True, height=320)
 
@@ -2083,21 +2103,21 @@ with tab6:
         fig_fat.add_trace(go.Bar(
             x=graf['Label'], y=graf['Meta'], name='Meta',
             marker_color='#4472C4',
-            text=graf['Meta'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            text=graf['Meta'].apply(lambda x: fmt_br(x, 0) if x > 0 else ''),
             textposition='outside', textfont=dict(size=10)
         ))
         # Realizado (laranja)
         fig_fat.add_trace(go.Bar(
             x=graf['Label'], y=graf['Realizado'], name='Realizado',
             marker_color='#ED7D31',
-            text=graf['Realizado'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            text=graf['Realizado'].apply(lambda x: fmt_br(x, 0) if x > 0 else ''),
             textposition='outside', textfont=dict(size=10, color='#ED7D31')
         ))
         # Previsao (verde) = Total Liquido para meses nao fechados
         fig_fat.add_trace(go.Bar(
             x=graf['Label'], y=graf['Previsao'], name='Previsao',
             marker_color='#70AD47',
-            text=graf['Previsao'].apply(lambda x: f"{x:,.0f}".replace(',', '.') if x > 0 else ''),
+            text=graf['Previsao'].apply(lambda x: fmt_br(x, 0) if x > 0 else ''),
             textposition='outside', textfont=dict(size=10, color='#70AD47')
         ))
 
@@ -2161,20 +2181,22 @@ with tab7:
 
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown(kpi_card(f"{len(com_previsao)}", "Com Previsao", "ok"), unsafe_allow_html=True)
-        c2.markdown(kpi_card(f"R$ {valor_com:,.0f}", "Valor c/ Previsao", "ok"), unsafe_allow_html=True)
+        c2.markdown(kpi_card(f"R$ {fmt_br(valor_com, 0)}", "Valor c/ Previsao", "ok"), unsafe_allow_html=True)
         c3.markdown(kpi_card(f"{len(sem_previsao)}", "Sem Previsao", "alert"), unsafe_allow_html=True)
-        c4.markdown(kpi_card(f"R$ {valor_sem:,.0f}", "Valor s/ Previsao", "warn"), unsafe_allow_html=True)
+        c4.markdown(kpi_card(f"R$ {fmt_br(valor_sem, 0)}", "Valor s/ Previsao", "warn"), unsafe_allow_html=True)
 
         st.markdown("")
         st.caption("Datas usadas: Dt Chegada Autron > Prazo Real Entrega > DT. Ofertada")
 
         # Grafico previsao - com VALOR nas barras
         if len(prev_fat) > 0:
-            fig_prev = px.bar(prev_fat, x='Mes_Prev_Faturamento', y='Valor_Previsto',
+            prev_fat_plot = prev_fat.copy()
+            prev_fat_plot['Valor_Label'] = prev_fat_plot['Valor_Previsto'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            fig_prev = px.bar(prev_fat_plot, x='Mes_Prev_Faturamento', y='Valor_Previsto',
                              title='Previsao de Faturamento Mes a Mes',
                              color_discrete_sequence=[CORES['azul_claro']],
-                             text='Valor_Previsto')
-            fig_prev.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
+                             text='Valor_Label')
+            fig_prev.update_traces(textposition='outside')
             fig_prev.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=450
