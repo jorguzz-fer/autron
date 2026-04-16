@@ -1566,17 +1566,11 @@ with tab3:
         if 'Prazo_Real_Entrega' in display_df.columns:
             display_df['Prazo_Real_Entrega'] = pd.to_datetime(display_df['Prazo_Real_Entrega'], errors='coerce').dt.strftime('%d-%m-%y').fillna('')
 
-        # Formatar Qtd para inteiro
+        # Manter Quantidade e Vlr.Total como numericos para ordenar corretamente
         if 'Quantidade' in display_df.columns:
-            display_df['Quantidade'] = pd.to_numeric(display_df['Quantidade'], errors='coerce').apply(
-                lambda x: f"{int(x)}" if pd.notna(x) and x == int(x) else (f"{x:.2f}" if pd.notna(x) else '')
-            )
-
-        # Formatar Vlr.Total como moeda
+            display_df['Quantidade'] = pd.to_numeric(display_df['Quantidade'], errors='coerce')
         if 'Vlr.Total' in display_df.columns:
-            display_df['Vlr.Total'] = pd.to_numeric(display_df['Vlr.Total'], errors='coerce').apply(
-                lambda x: f"R$ {fmt_br(x, 2)}" if pd.notna(x) else ''
-            )
+            display_df['Vlr.Total'] = pd.to_numeric(display_df['Vlr.Total'], errors='coerce')
 
         rename_disp = {
             'Num. Pedido': 'PV',
@@ -1614,6 +1608,14 @@ with tab3:
             return ''
 
         styled = display_df.style
+        # Formatar Qtd e Valor Total preservando tipo numerico (para ordenacao)
+        fmt_dict = {}
+        if 'Qtd' in display_df.columns:
+            fmt_dict['Qtd'] = lambda x: "" if pd.isna(x) else (f"{int(x)}" if x == int(x) else f"{x:.2f}")
+        if 'Valor Total' in display_df.columns:
+            fmt_dict['Valor Total'] = lambda x: "" if pd.isna(x) else f"R$ {fmt_br(x, 2)}"
+        if fmt_dict:
+            styled = styled.format(fmt_dict)
         if 'Disponivel?' in display_df.columns:
             styled = styled.applymap(color_pronto, subset=['Disponivel?'])
         if 'Acao' in display_df.columns:
