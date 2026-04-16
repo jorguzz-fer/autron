@@ -1501,6 +1501,17 @@ with tab3:
         if atend_filtro != 'Todos':
             det = det[det['Atendimento_Prazo'] == atend_filtro]
 
+        # Filtro por Mes de Faturamento (baseado em Entrega)
+        if 'Entrega' in det.columns:
+            det['_Mes_Entrega'] = pd.to_datetime(det['Entrega'], errors='coerce').dt.to_period('M').astype(str)
+            meses_disp = sorted([m for m in det['_Mes_Entrega'].unique() if m and m != 'NaT'])
+            mes_fat_filtro = st.multiselect(
+                "Filtrar por Mes de Faturamento (Dt. Entrega Adaptada)",
+                options=meses_disp, default=[], key='mes_fat_filtro'
+            )
+            if mes_fat_filtro:
+                det = det[det['_Mes_Entrega'].isin(mes_fat_filtro)]
+
         # Criar coluna SC_ou_OP (SC se existir; senao OP)
         def sc_ou_op(row):
             sc = row.get('Numero SC')
@@ -1518,18 +1529,22 @@ with tab3:
         det['SC_OP'] = det.apply(sc_ou_op, axis=1)
 
         tab_cols = ['Num. Pedido', 'Razao Social', 'Item', 'Produto', 'Descricao do Produto', 'Tipo_Produto',
-                   'Quantidade', 'Disponivel', 'Disponivel_Estoque', 'SC_OP', 'Acao_Necessaria',
+                   'Quantidade', 'Vlr.Total', 'Disponivel', 'Disponivel_Estoque', 'SC_OP', 'Acao_Necessaria',
                    'DT. Fat. Cli', 'Entrega', 'Prazo_Real_Entrega', 'Atendimento_Prazo',
                    'Semana_Entrega', 'Ped Cliente']
         tab_cols = [c for c in tab_cols if c in det.columns]
 
         display_df = det[tab_cols].copy()
 
-        # Formatar datas para dd-mm-yy
-        for col_data in ['DT. Fat. Cli', 'Entrega', 'Prazo_Real_Entrega']:
+        # Formatar Dt.Necessidade e Dt.Entrega Adaptada como MM.DD.AA (para ordenacao)
+        for col_data in ['DT. Fat. Cli', 'Entrega']:
             if col_data in display_df.columns:
-                display_df[col_data] = pd.to_datetime(display_df[col_data], errors='coerce').dt.strftime('%d-%m-%y')
+                display_df[col_data] = pd.to_datetime(display_df[col_data], errors='coerce').dt.strftime('%m.%d.%y')
                 display_df[col_data] = display_df[col_data].fillna('')
+
+        # Prazo Entrega mantem dd-mm-yy
+        if 'Prazo_Real_Entrega' in display_df.columns:
+            display_df['Prazo_Real_Entrega'] = pd.to_datetime(display_df['Prazo_Real_Entrega'], errors='coerce').dt.strftime('%d-%m-%y').fillna('')
 
         # Formatar Qtd para inteiro
         if 'Quantidade' in display_df.columns:
@@ -1537,11 +1552,18 @@ with tab3:
                 lambda x: f"{int(x)}" if pd.notna(x) and x == int(x) else (f"{x:.2f}" if pd.notna(x) else '')
             )
 
+        # Formatar Vlr.Total como moeda
+        if 'Vlr.Total' in display_df.columns:
+            display_df['Vlr.Total'] = pd.to_numeric(display_df['Vlr.Total'], errors='coerce').apply(
+                lambda x: f"R$ {x:,.2f}" if pd.notna(x) else ''
+            )
+
         rename_disp = {
             'Num. Pedido': 'PV',
             'Razao Social': 'Cliente',
             'Descricao do Produto': 'Descricao',
             'Tipo_Produto': 'Tipo', 'Quantidade': 'Qtd',
+            'Vlr.Total': 'Valor Total',
             'Disponivel': 'Disponivel?', 'Disponivel_Estoque': 'Estoque',
             'SC_OP': 'SC / OP',
             'Acao_Necessaria': 'Acao',
