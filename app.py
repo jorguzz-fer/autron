@@ -422,12 +422,20 @@ def carregar_e_processar():
             except Exception:
                 fat_devol = None
 
-        # Unificar vendas + devolucoes
-        # IMPORTANTE: A aba de Vendas JA INCLUI devolucoes como linhas com valores negativos.
-        # A aba de Devolucoes e redundante - somar resultaria em duplicacao.
-        # Entao usamos APENAS a aba de Vendas. A aba de Devolucoes fica disponivel
-        # apenas para referencia/filtro quando precisar.
-        fat = fat_vendas
+        # Unificar vendas + devolucoes (sempre compilar ambas as abas)
+        # Deduplicar: se um documento ja existe em Vendas, nao adicionar da aba Devolucoes
+        if fat_devol is not None and len(fat_devol) > 0:
+            docs_vendas = set(fat_vendas['Num. Docto.'].astype(str).str.strip()) if 'Num. Docto.' in fat_vendas.columns else set()
+            if 'Num. Docto.' in fat_devol.columns:
+                fat_devol_new = fat_devol[~fat_devol['Num. Docto.'].astype(str).str.strip().isin(docs_vendas)]
+            else:
+                fat_devol_new = fat_devol
+            if len(fat_devol_new) > 0:
+                fat = pd.concat([fat_vendas, fat_devol_new], ignore_index=True, sort=False)
+            else:
+                fat = fat_vendas
+        else:
+            fat = fat_vendas
 
         fat.columns = fat.columns.astype(str).str.strip()
 
