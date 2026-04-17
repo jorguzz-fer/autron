@@ -1540,11 +1540,36 @@ with tab3:
             if mes_fat_filtro:
                 det = det[det['_Mes_Entrega'].isin(mes_fat_filtro)]
 
-        # Criar coluna SC_ou_OP (SC se existir; senao OP)
+        # Criar coluna SC_ou_OP
+        # Match por produto: buscar SC no followup quando nao tem SC direta
+        # Carregar followup para match terciario
+        REPO_DIR_TAB = os.path.dirname(os.path.abspath(__file__))
+        def _resolver(nome):
+            p1 = os.path.join(DATA_DIR, nome)
+            p2 = os.path.join(REPO_DIR_TAB, nome)
+            if os.path.exists(p1) and os.path.exists(p2):
+                return p2 if os.path.getmtime(p2) > os.path.getmtime(p1) else p1
+            return p1 if os.path.exists(p1) else p2
+
+        try:
+            fu_raw = pd.read_excel(_resolver("followup.xlsx"), header=1)
+            fu_raw.columns = fu_raw.columns.astype(str).str.strip()
+            # Indice: Codigo Item -> lista de SCs (mais recentes primeiro)
+            fu_raw['No. da S.C.'] = pd.to_numeric(fu_raw['No. da S.C.'], errors='coerce')
+            fu_por_produto = fu_raw.dropna(subset=['No. da S.C.']).sort_values('No. da S.C.', ascending=False)
+            sc_por_produto = fu_por_produto.groupby('Codigo Item')['No. da S.C.'].first().to_dict()
+        except Exception:
+            sc_por_produto = {}
+
         def sc_ou_op(row):
+            # 1) SC direta do entrada_pedido
             sc = row.get('Numero SC')
             if pd.notna(sc) and str(sc).strip() not in ('', 'nan'):
-                return f"SC {int(float(sc)) if pd.notna(sc) else ''}"
+                try:
+                    return f"SC {int(float(sc))}"
+                except (ValueError, TypeError):
+                    return f"SC {sc}"
+            # 2) OP do entrada_pedido ou followup
             op = row.get('Numero OP')
             op_fu = row.get('FU_OP_na_SC')
             for v in (op, op_fu):
@@ -1553,6 +1578,14 @@ with tab3:
                         return f"OP {int(float(v))}"
                     except (ValueError, TypeError):
                         return f"OP {v}"
+            # 3) Match por produto no followup (SC mais recente para o mesmo produto)
+            prod = str(row.get('Produto', '')).strip()
+            if prod and prod in sc_por_produto:
+                sc_match = sc_por_produto[prod]
+                try:
+                    return f"SC {int(sc_match)}"
+                except (ValueError, TypeError):
+                    return f"SC {sc_match}"
             return ''
         det['SC_OP'] = det.apply(sc_ou_op, axis=1)
 
