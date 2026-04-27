@@ -149,7 +149,60 @@ Projeto entregue e em producao.
 
 ---
 
-## 6. CONDICOES
+## 6. PRE-REQUISITOS
+
+### 6.1 Infraestrutura (por conta do cliente)
+
+| Item | Especificacao |
+|------|---------------|
+| VPS (Servidor Virtual Privado) | Minimo 2 vCPUs, 4GB RAM, 40GB SSD |
+| Sistema Operacional | Linux (Ubuntu 22.04+ ou Debian 12+) |
+| Dominio | Dominio proprio com DNS apontado para a VPS |
+| Certificado SSL | Configurado via Coolify (Let's Encrypt automatico) |
+
+### 6.2 Stack Tecnologico
+
+| Camada | Tecnologia |
+|--------|------------|
+| Linguagem | Python 3.11+ |
+| Processamento de dados | Pandas, NumPy |
+| Visualizacao | Plotly (graficos interativos) |
+| Containerizacao | Docker |
+| Orquestracao/Deploy | Coolify (PaaS self-hosted) |
+| Versionamento | Git / GitHub (repositorio privado) |
+| Servidor Web | Integrado ao framework Python |
+
+---
+
+## 7. PROTOCOLOS DE SEGURANCA
+
+### 7.1 Autenticacao e Acesso
+- Login obrigatorio com email e senha para acesso ao dashboard
+- Credenciais armazenadas via variavel de ambiente (nao expostas no codigo)
+- Sessao autenticada com controle de logout
+
+### 7.2 Infraestrutura
+- Aplicacao executada em container Docker isolado
+- Comunicacao via HTTPS com certificado SSL (Let's Encrypt)
+- VPS com acesso restrito por SSH (chave publica, sem senha)
+- Repositorio GitHub privado com acesso controlado
+
+### 7.3 Dados
+- Dados permanecem exclusivamente no servidor do cliente (VPS)
+- Nenhum dado e transmitido para servicos terceiros
+- Arquivos sensiveis (.xlsx, .csv) excluidos do versionamento Git (.gitignore)
+- Upload de dados apenas por usuarios autenticados
+- Cache de dados com expiracao automatica (5 minutos)
+
+### 7.4 Codigo
+- Codigo-fonte versionado em repositorio privado
+- Deploy automatizado via Git (sem acesso manual ao servidor em producao)
+- Sem armazenamento de credenciais no codigo-fonte
+- Variaveis de ambiente para configuracoes sensiveis (AUTH_USERS, DATA_DIR)
+
+---
+
+## 8. CONDICOES
 
 - Eventuais novas funcionalidades ou modulos serao cotados separadamente
 - Suporte tecnico e manutencao evolutiva podem ser contratados em separado
@@ -158,7 +211,7 @@ Projeto entregue e em producao.
 
 ---
 
-## 7. VALIDADE
+## 9. VALIDADE
 
 Esta proposta tem validade de 30 dias a partir da data de emissao.
 
