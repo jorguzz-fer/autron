@@ -1212,7 +1212,8 @@ with tab1:
 
 # ===== ABA 2: ENTRADA DE PEDIDOS =====
 with tab2:
-    filtered_t2 = filtro_data(filtered, 'DT Emissao', 'DT Emissao', 'tab2_entrada')
+    # Usa todos os pedidos (abertos + fechados), ignorando filtro de status da sidebar
+    filtered_t2 = filtro_data(df, 'DT Emissao', 'DT Emissao', 'tab2_entrada')
 
     # KPIs
     total_ep = len(filtered_t2)
@@ -1234,7 +1235,7 @@ with tab2:
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.markdown(kpi_card(f"{total_pvs_ep}", "Total PVs"), unsafe_allow_html=True)
-    c2.markdown(kpi_card(f"{total_ep:,}", "Total Linhas"), unsafe_allow_html=True)
+    c2.markdown(kpi_card(f"{fmt_br(total_ep, 0)}", "Total Linhas"), unsafe_allow_html=True)
     c3.markdown(kpi_card(f"R$ {fmt_br(valor_total_ep, 0)}", "Valor Total"), unsafe_allow_html=True)
     c4.markdown(kpi_card(f"R$ {fmt_br(valor_2026, 0)}", "Valor 2026"), unsafe_allow_html=True)
     c5.markdown(kpi_card(f"R$ {fmt_br(meta_entrada_grupo, 0)}", "Meta 2026 Grupo"), unsafe_allow_html=True)
@@ -1245,9 +1246,10 @@ with tab2:
     entrada_mes = filtered_t2.groupby('Mes_Emissao').agg(
         Qtd_Linhas=('Vlr.Total', 'count'),
         Qtd_PVs=('Num. Pedido', 'nunique'),
+        Qtd_Pecas=('Quantidade', 'sum'),
         Valor_Total=('Vlr.Total', 'sum'),
     ).reset_index().sort_values('Mes_Emissao')
-    entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Valor Total']
+    entrada_mes.columns = ['Mes', 'Qtd Linhas', 'Qtd PVs', 'Qtd Pecas', 'Valor Total']
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -1262,7 +1264,213 @@ with tab2:
         )
         st.plotly_chart(fig_ent, use_container_width=True)
     with col2:
-        st.dataframe(entrada_mes, use_container_width=True, height=450)
+        entrada_mes_display = entrada_mes.copy()
+        entrada_mes_display['Qtd Pecas'] = entrada_mes_display['Qtd Pecas'].apply(lambda x: fmt_br(x, 0))
+        entrada_mes_display['Valor Total'] = entrada_mes_display['Valor Total'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+        st.dataframe(entrada_mes_display, use_container_width=True, height=450)
+
+    # === Analise por Unidade de Negocio (IND) ===
+    if 'Unidade Negocio' in filtered_t2.columns:
+        st.markdown("### 🏭 Analise por Unidade de Negocio")
+        ind_ano_sel = st.selectbox(
+            "Ano", sorted(filtered_t2['Ano_Emissao'].dropna().unique().astype(int), reverse=True),
+            key='tab2_ind_ano'
+        )
+        ep_ind = filtered_t2[filtered_t2['Ano_Emissao'] == ind_ano_sel].copy()
+
+        ind_resumo = ep_ind.groupby('Unidade Negocio').agg(
+            Qtd_Pecas=('Quantidade', 'sum'),
+            Qtd_PVs=('Num. Pedido', 'nunique'),
+            Valor_Total=('Vlr.Total', 'sum'),
+        ).reset_index().sort_values('Valor_Total', ascending=False)
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            fig_ind = px.bar(
+                ind_resumo, x='Unidade Negocio', y='Valor_Total',
+                title=f'Valor por Unidade de Negocio - {ind_ano_sel}',
+                color_discrete_sequence=[CORES['azul_claro']],
+                text='Qtd_PVs'
+            )
+            fig_ind.update_traces(texttemplate='%{text} PVs', textposition='outside')
+            fig_ind.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=400
+            )
+            st.plotly_chart(fig_ind, use_container_width=True)
+        with col2:
+            ind_display = ind_resumo.copy()
+            ind_display.rename(columns={'Unidade Negocio': 'IND', 'Qtd_PVs': 'PVs'}, inplace=True)
+            ind_display['Qtd Pecas'] = ind_display['Qtd_Pecas'].apply(lambda x: fmt_br(x, 0))
+            ind_display['Valor Total'] = ind_display['Valor_Total'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            ind_display = ind_display[['IND', 'PVs', 'Qtd Pecas', 'Valor Total']]
+            st.dataframe(ind_display, use_container_width=True, height=400)
+
+        # Mes a mes por IND
+        ind_mes = ep_ind.groupby(['Mes_Emissao', 'Unidade Negocio']).agg(
+            Valor_Total=('Vlr.Total', 'sum')
+        ).reset_index()
+        if len(ind_mes) > 0:
+            fig_ind_mes = px.bar(
+                ind_mes, x='Mes_Emissao', y='Valor_Total', color='Unidade Negocio',
+                title=f'Entrada por Unidade de Negocio - Mes a Mes ({ind_ano_sel})',
+                barmode='stack'
+            )
+            fig_ind_mes.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#E0E0E0', xaxis_title='', yaxis_title='R$', height=380,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig_ind_mes, use_container_width=True)
+
+    # === Analise de Pedidos de Contrato ===
+    col_contrato = 'Contrato' if 'Contrato' in filtered_t2.columns else None
+    col_grupo = 'Grupo Vend.' if 'Grupo Vend.' in filtered_t2.columns else None
+
+    if col_contrato and col_grupo:
+        st.markdown("### 📝 Pedidos de Contrato")
+        ep_contrato = filtered_t2[filtered_t2[col_contrato].astype(str).str.upper().str.strip() == 'SIM'].copy()
+
+        if len(ep_contrato) > 0:
+            anos_contrato = sorted(ep_contrato['Ano_Emissao'].dropna().unique().astype(int), reverse=True)
+            anos_disponiveis = sorted(filtered_t2['Ano_Emissao'].dropna().unique().astype(int), reverse=True)
+
+            col_c1, col_c2 = st.columns([1, 3])
+            with col_c1:
+                ano_contrato_sel = st.selectbox("Ano", anos_disponiveis, key='tab2_contrato_ano')
+            with col_c2:
+                st.caption(f"Pedidos com campo Contrato = SIM | {len(ep_contrato[ep_contrato['Ano_Emissao'] == ano_contrato_sel])} linhas em {ano_contrato_sel}")
+
+            ep_c_ano = ep_contrato[ep_contrato['Ano_Emissao'] == ano_contrato_sel]
+            ep_total_ano = filtered_t2[filtered_t2['Ano_Emissao'] == ano_contrato_sel]
+
+            # Penetracao de contrato por mes
+            pen_mes = ep_total_ano.groupby('Mes_Emissao').agg(
+                Total_Valor=('Vlr.Total', 'sum')
+            ).reset_index()
+            pen_c_mes = ep_c_ano.groupby('Mes_Emissao').agg(
+                Contrato_Valor=('Vlr.Total', 'sum')
+            ).reset_index()
+            pen = pen_mes.merge(pen_c_mes, on='Mes_Emissao', how='left').fillna(0)
+            pen['Penetracao %'] = np.where(
+                pen['Total_Valor'] > 0,
+                pen['Contrato_Valor'] / pen['Total_Valor'] * 100, 0
+            )
+
+            # Comparativo YoY penetracao
+            ano_ant = None
+            if len(anos_disponiveis) >= 2:
+                ano_ant = anos_disponiveis[1] if ano_contrato_sel == anos_disponiveis[0] else None
+                if ano_ant:
+                    pen_total_ant = filtered_t2[filtered_t2['Ano_Emissao'] == ano_ant]['Vlr.Total'].sum()
+                    pen_c_ant = ep_contrato[ep_contrato['Ano_Emissao'] == ano_ant]['Vlr.Total'].sum()
+                    pen_pct_ant = (pen_c_ant / pen_total_ant * 100) if pen_total_ant > 0 else 0
+                    pen_total_sel = filtered_t2[filtered_t2['Ano_Emissao'] == ano_contrato_sel]['Vlr.Total'].sum()
+                    pen_c_sel = ep_c_ano['Vlr.Total'].sum()
+                    pen_pct_sel = (pen_c_sel / pen_total_sel * 100) if pen_total_sel > 0 else 0
+                    delta_pen = pen_pct_sel - pen_pct_ant
+                    seta = "▲" if delta_pen > 0 else ("▼" if delta_pen < 0 else "=")
+                    cor_seta = "#2ECC71" if delta_pen > 0 else ("#E74C3C" if delta_pen < 0 else "#888")
+                    st.markdown(
+                        f"<span style='font-size:1.1rem'>Penetracao Contrato {ano_contrato_sel}: "
+                        f"<b>{pen_pct_sel:.1f}%</b> &nbsp; "
+                        f"<span style='color:{cor_seta}'>{seta} {abs(delta_pen):.1f} p.p. vs {ano_ant}</span></span>",
+                        unsafe_allow_html=True
+                    )
+
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                fig_pen = go.Figure()
+                fig_pen.add_trace(go.Bar(
+                    x=pen['Mes_Emissao'], y=pen['Total_Valor'],
+                    name='Total Pedidos', marker_color='#4472C4', opacity=0.5
+                ))
+                fig_pen.add_trace(go.Bar(
+                    x=pen['Mes_Emissao'], y=pen['Contrato_Valor'],
+                    name='Pedidos Contrato', marker_color='#ED7D31'
+                ))
+                fig_pen.add_trace(go.Scatter(
+                    x=pen['Mes_Emissao'], y=pen['Penetracao %'],
+                    name='Penetracao %', mode='lines+markers',
+                    yaxis='y2', line=dict(color='#FFC000', width=2)
+                ))
+                fig_pen.update_layout(
+                    barmode='overlay',
+                    title=f'Pedidos de Contrato - Mes a Mes ({ano_contrato_sel})',
+                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#E0E0E0', xaxis_title='', yaxis_title='R$',
+                    yaxis2=dict(title='%', overlaying='y', side='right', showgrid=False),
+                    height=400,
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+                )
+                st.plotly_chart(fig_pen, use_container_width=True)
+            with col2:
+                pen_display = pen.copy()
+                pen_display['Total'] = pen_display['Total_Valor'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+                pen_display['Contrato'] = pen_display['Contrato_Valor'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+                pen_display['Penetracao %'] = pen_display['Penetracao %'].apply(lambda x: f"{x:.1f}%")
+                pen_display = pen_display[['Mes_Emissao', 'Total', 'Contrato', 'Penetracao %']]
+                pen_display.columns = ['Mes', 'Total', 'Contrato', 'Penetracao %']
+                st.dataframe(pen_display, use_container_width=True, height=400)
+
+            # Tabela por cliente
+            st.markdown("#### Por Cliente (Grupo Vend.)")
+            grp_cliente = ep_c_ano.groupby(col_grupo).agg(
+                Qtd_Pecas=('Quantidade', 'sum'),
+                Qtd_PVs=('Num. Pedido', 'nunique'),
+                Valor_Total=('Vlr.Total', 'sum'),
+            ).reset_index().sort_values('Valor_Total', ascending=False)
+
+            # YoY por cliente
+            if ano_ant:
+                ep_c_ant = ep_contrato[ep_contrato['Ano_Emissao'] == ano_ant]
+                grp_ant = ep_c_ant.groupby(col_grupo).agg(
+                    Valor_Ant=('Vlr.Total', 'sum')
+                ).reset_index()
+                grp_cliente = grp_cliente.merge(grp_ant, on=col_grupo, how='left').fillna(0)
+                grp_cliente['Var. YoY'] = np.where(
+                    grp_cliente['Valor_Ant'] > 0,
+                    (grp_cliente['Valor_Total'] - grp_cliente['Valor_Ant']) / grp_cliente['Valor_Ant'] * 100,
+                    np.nan
+                )
+            else:
+                grp_cliente['Var. YoY'] = np.nan
+
+            clientes_unicos = grp_cliente[col_grupo].tolist()
+            cliente_expand = st.selectbox(
+                "Expandir cliente para ver produtos", ['(nenhum)'] + clientes_unicos,
+                key='tab2_contrato_cliente'
+            )
+
+            grp_display = grp_cliente.copy()
+            grp_display['Qtd Pecas'] = grp_display['Qtd_Pecas'].apply(lambda x: fmt_br(x, 0))
+            grp_display['Valor Total'] = grp_display['Valor_Total'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+            cols_show = [col_grupo, 'Qtd_PVs', 'Qtd Pecas', 'Valor Total']
+            if ano_ant and 'Valor_Ant' in grp_display.columns:
+                grp_display[f'Valor {ano_ant}'] = grp_display['Valor_Ant'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+                grp_display['Var. YoY'] = grp_display['Var. YoY'].apply(
+                    lambda x: f"{'▲' if x > 0 else '▼'} {abs(x):.1f}%" if pd.notna(x) else "-"
+                )
+                cols_show += [f'Valor {ano_ant}', 'Var. YoY']
+            grp_display = grp_display[cols_show].rename(columns={'Qtd_PVs': 'PVs'})
+            st.dataframe(grp_display, use_container_width=True)
+
+            # Detalhe por produto do cliente selecionado
+            if cliente_expand != '(nenhum)':
+                st.markdown(f"**Produtos - {cliente_expand}**")
+                ep_cli = ep_c_ano[ep_c_ano[col_grupo] == cliente_expand]
+                prod_cli = ep_cli.groupby(['Produto', 'Descricao do Produto']).agg(
+                    Qtd_Pecas=('Quantidade', 'sum'),
+                    Qtd_PVs=('Num. Pedido', 'nunique'),
+                    Valor_Total=('Vlr.Total', 'sum'),
+                ).reset_index().sort_values('Valor_Total', ascending=False)
+                prod_display = prod_cli.copy()
+                prod_display['Qtd Pecas'] = prod_display['Qtd_Pecas'].apply(lambda x: fmt_br(x, 0))
+                prod_display['Valor Total'] = prod_display['Valor_Total'].apply(lambda x: f"R$ {fmt_br(x, 0)}")
+                prod_display = prod_display[['Produto', 'Descricao do Produto', 'Qtd_PVs', 'Qtd Pecas', 'Valor Total']].rename(columns={'Qtd_PVs': 'PVs'})
+                st.dataframe(prod_display, use_container_width=True)
+        else:
+            st.info("Nenhum pedido de contrato encontrado no periodo selecionado.")
 
     # === Meta x Realizado GRUPO ===
     if df_budget is not None and 'Meta_Entrada' in df_budget.columns:
