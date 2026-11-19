@@ -34,7 +34,7 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
 .chip i{font-style:normal;font:600 12px Inter;color:var(--teal2);letter-spacing:.12em;width:70px;flex:none}
 .chip b{font-size:16px;font-weight:600}.chip small{display:block;color:var(--mut);font-size:13px;margin-top:2px}
 .stats{display:flex;gap:28px;margin-top:30px}
-.client{margin-top:26px;padding:12px 16px;border:1px solid var(--line);border-left:3px solid var(--teal);border-radius:10px;font-size:15px;color:var(--mut);max-width:max-content}.client b{color:#fff;font-weight:600}
+.client{font-size:clamp(22px,1.9vw,30px);font-weight:600;color:#fff;margin:0 0 22px;padding-left:16px;border-left:3px solid var(--teal);line-height:1.25}.client span{display:block;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:4px}
 .stat b{display:block;font-size:44px;font-weight:600;letter-spacing:-.02em}
 .stat small{color:var(--mut);font-size:13px;letter-spacing:.08em;text-transform:uppercase}
 /* stepper */
@@ -88,9 +88,9 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
  <div id="slides">
   <section class="slide" data-k="hero">
    <p class="eb">Proposta técnica</p>
+   <p class="client"><span>Preparado para</span>Usiminas Taubaté</p>
    <h1>Duas pontes rolantes. <em>Um só comando.</em></h1>
    <p class="body">Radares, encoder e remotas medem cada movimento das pontes e levam tudo, sem fio, até a mesa de comando do operador.</p>
-   <p class="client">Preparado para <b>Usiminas · Taubaté</b></p>
    <div class="stats"><div class="stat"><b>2</b><small>pontes</small></div><div class="stat"><b>3</b><small>eixos medidos</small></div><div class="stat"><b>1</b><small>mesa de comando</small></div></div>
   </section>
   <section class="slide" data-k="sistema">
