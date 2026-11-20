@@ -31,7 +31,7 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
 .chips{display:flex;flex-direction:column;gap:10px;margin-top:28px;max-width:520px}
 .chip{display:flex;gap:16px;align-items:center;padding:14px 18px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.02);cursor:pointer;transition:.25s;text-align:left;color:inherit;font:inherit}
 .chip:hover,.chip.act{border-color:var(--teal);background:rgba(17,181,176,.1)}
-.chip i{font-style:normal;font:600 12px Inter;color:var(--teal2);letter-spacing:.12em;width:70px;flex:none}
+.chip i{font-style:normal;font:600 12px Inter;color:var(--teal2);letter-spacing:.12em;width:118px;flex:none;line-height:1.4}
 .chip b{font-size:16px;font-weight:600}.chip small{display:block;color:var(--mut);font-size:13px;margin-top:2px}
 .stats{display:flex;gap:28px;margin-top:30px}
 .client{font-size:clamp(22px,1.9vw,30px);font-weight:600;color:#fff;margin:0 0 22px;padding-left:16px;border-left:3px solid var(--teal);line-height:1.25}.client span{display:block;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:4px}
@@ -89,7 +89,7 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
   <section class="slide" data-k="hero">
    <p class="eb">Proposta técnica</p>
    <p class="client"><span>Preparado para</span>Usiminas Taubaté</p>
-   <h1>Duas pontes rolantes. <em>Um só comando.</em></h1>
+   <h1>Duas pontes rolantes. <em>Um só comando remoto.</em></h1>
    <p class="body">Radares, encoder e remotas medem cada movimento das pontes e levam tudo, sem fio, até a mesa de comando do operador.</p>
    <div class="stats"><div class="stat"><b>2</b><small>pontes</small></div><div class="stat"><b>3</b><small>eixos medidos</small></div><div class="stat"><b>1</b><small>mesa de comando</small></div></div>
   </section>
@@ -98,28 +98,28 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
    <h2>Três medições <em>em cada ponte.</em></h2>
    <p class="body">A segunda ponte é um espelho da primeira: mesmos equipamentos, mesma lógica. Toque em uma medição para vê-la no modelo.</p>
    <div class="chips">
-    <button class="chip" data-go="ponte"><i>PONTE</i><span><b>Radar Symeo 291</b><small>Posição da ponte no caminho de rolamento</small></span></button>
-    <button class="chip" data-go="carro"><i>CARRO</i><span><b>Radar OndoSense D300</b><small>Posição do carro ao longo da ponte</small></span></button>
-    <button class="chip" data-go="eixoz"><i>EIXO Z</i><span><b>Encoder T58</b><small>Altura do gancho</small></span></button>
+    <button class="chip" data-go="ponte"><i>PONTE /<br>EIXO X</i><span><b>Radar Symeo 291</b><small>Posição da ponte na viga de rolamento</small></span></button>
+    <button class="chip" data-go="carro"><i>CARRO /<br>EIXO Y</i><span><b>Radar OndoSense D300</b><small>Posição do carro ao longo da ponte</small></span></button>
+    <button class="chip" data-go="eixoz"><i>EIXO Z /<br>ELEVAÇÃO</i><span><b>Encoder T58</b><small>Elevação da carga</small></span></button>
    </div>
   </section>
   <section class="slide" data-k="ponte">
-   <p class="eb">01 · Translação da ponte</p>
+   <p class="eb">01 · Translação da ponte · Eixo X</p>
    <h2>Radar Symeo 291, <em>sem contato.</em></h2>
-   <p class="body">Na cabeceira de cada ponte, o <b>LPR-1DHP-291</b> mede continuamente a distância até um <b>cone refletor</b> fixo na lateral do caminho de rolamento.</p>
+   <p class="body">Na cabeceira de cada ponte, o <b>LPR-1DHP-291</b> mede continuamente a distância até um <b>cone refletor</b> fixo na lateral da viga de rolamento.</p>
    <div class="specs"><div><span>Mede</span><strong>Posição da ponte</strong></div><div><span>Interface</span><strong>Ethernet + cone refletor</strong></div><div><span>Tecnologia</span><strong>Radar 60 GHz, precisão milimétrica</strong></div><div><span>Quantidade</span><strong>2 · uma por ponte</strong></div></div>
   </section>
   <section class="slide" data-k="carro">
-   <p class="eb">02 · Translação do carro</p>
+   <p class="eb">02 · Translação do carro · Eixo Y</p>
    <h2>OndoSense D300 <em>acompanha o carro.</em></h2>
    <p class="body">Montado no carro de translação, o <b>D300</b> mede a posição do carro ao longo da ponte contra o <b>cone de reflexão</b> instalado na extremidade da viga.</p>
    <div class="specs"><div><span>Mede</span><strong>Posição do carro</strong></div><div><span>Interface</span><strong>Analógica + cone de reflexão</strong></div><div><span>Quantidade</span><strong>2 · um por ponte</strong></div></div>
   </section>
   <section class="slide" data-k="eixoz">
-   <p class="eb">03 · Eixo Z</p>
-   <h2>Encoder T58: <em>a altura do gancho.</em></h2>
-   <p class="body">No carro, o <b>encoder T58</b>, ligado <b>via VMET</b>, informa a posição do eixo Z para o controle de posicionamento do gancho.</p>
-   <div class="specs"><div><span>Mede</span><strong>Altura do gancho</strong></div><div><span>Interface</span><strong>Via VMET</strong></div><div><span>Quantidade</span><strong>2 · um por ponte</strong></div></div>
+   <p class="eb">03 · Eixo Z · Elevação da carga</p>
+   <h2>Encoder T58: <em>içamento da carga.</em></h2>
+   <p class="body">No carro, o <b>encoder T58</b>, ligado <b>via Ethernet</b>, faz a medição do <b>içamento da carga</b> no eixo Z.</p>
+   <div class="specs"><div><span>Mede</span><strong>Içamento da carga</strong></div><div><span>Interface</span><strong>Ethernet</strong></div><div><span>Quantidade</span><strong>2 · um por ponte</strong></div></div>
   </section>
   <section class="slide" data-k="remota">
    <p class="eb">04 · Concentração de sinais</p>
@@ -136,7 +136,7 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
   <section class="slide" data-k="comando">
    <p class="eb">06 · Controle</p>
    <h2>Mesa de comando <em>e PLC.</em></h2>
-   <p class="body">O <b>PLC</b> recebe as posições das duas pontes e controla a <b>mesa de comando</b>, o posto do operador.</p>
+   <p class="body">O <b>PLC</b> recebe a posição das pontes, que são controladas através da <b>mesa de comando</b>, o posto de trabalho do operador.</p>
    <div class="specs"><div><span>Mesa de comando</span><strong class="au">Autron</strong></div><div><span>PLC</span><strong class="ex">À parte · Rockwell</strong></div></div>
   </section>
   <section class="slide" data-k="fluxo">
@@ -282,16 +282,16 @@ const FLOW=[
  {t:'Antena na ponte',s:'Acompanha o movimento',hl:['rede'],cam:[0,8,0,.8],net:1},
  {t:'Access point',s:'Rádio Cisco ou Westcom · à parte',hl:['rede'],cam:[0,7,-3,.85],net:1,ext:1},
  {t:'PLC',s:'Rockwell · à parte',hl:['plc'],cam:[-1.3,1.5,ZW,2.0],net:.6,ext:1},
- {t:'Mesa de comando',s:'Posto do operador',hl:['mesa'],cam:[-.2,1.5,ZW,2.0]},
+ {t:'Mesa de comando',s:'Posto de trabalho do operador',hl:['mesa'],cam:[-.2,1.5,ZW,2.0]},
 ];
-const ITEMS={au:[['2','Remota de I/O','Ethernet · IP20'],['2','Radar Symeo LPR-1DHP-291 + cone refletor','Ethernet · posição da ponte'],['2','Radar OndoSense D300 + cone de reflexão','Analógico · posição do carro'],['2','Encoder T58 via VMET','Eixo Z · altura do gancho'],['1','Mesa de comando','Posto do operador']],
+const ITEMS={au:[['2','Remota de I/O','Ethernet · IP20'],['2','Radar Symeo LPR-1DHP-291 + cone refletor','Ethernet · posição da ponte'],['2','Radar OndoSense D300 + cone de reflexão','Analógico · posição do carro'],['2','Encoder T58','Ethernet · içamento da carga'],['1','Mesa de comando','Posto de trabalho do operador']],
  ex:[['1','PLC','Fornecimento Rockwell'],['1','Access point + 2 antenas','Fornecimento Cisco ou Westcom']]};
 const TABHL={au:['remota','r291','d300','t58','mesa','cone291','cone300'],ex:['plc','rede']};
 const wp=(o,dy=0)=>o.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,dy,0));
 const LABELS={
  r291:()=>[[wp(groups.r291[0],1),'Symeo 291','ponte 1'],[wp(groups.r291[2],1),'Symeo 291','ponte 2'],[wp(groups.cone291[0],1.3),'Cone refletor',''],[wp(groups.cone291[1],1.3),'Cone refletor','']],
  d300:()=>[[wp(groups.d300[0],.9),'OndoSense D300','analógico'],[wp(groups.cone300[0],1),'Cone de reflexão','']],
- t58:()=>[[wp(groups.t58[0],.9),'Encoder T58','via VMET · eixo Z']],
+ t58:()=>[[wp(groups.t58[0],.9),'Encoder T58','Ethernet · eixo Z']],
  remota:()=>[[wp(groups.remota[0],1),'Remota 1','Ethernet'],[wp(groups.remota[1],1),'Remota 2','Ethernet']],
  rede:()=>[[new THREE.Vector3(0,11.2,-RZ-1.3),'Access point','+ 2 antenas']],
  plc:()=>[[new THREE.Vector3(-3.2,3.1,ZW),'PLC','Rockwell'],[new THREE.Vector3(.6,3.1,ZW),'Mesa de comando','posto do operador']],
