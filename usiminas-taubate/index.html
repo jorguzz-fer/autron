@@ -28,6 +28,7 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
 .specs div{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}
 .specs span{color:var(--mut)}.specs strong{font-weight:600;text-align:right}
 .au{color:var(--teal2)!important}.ex{color:var(--amber)!important}
+.note{margin-top:22px;max-width:520px;padding:14px 18px;border-radius:12px;background:rgba(17,181,176,.08);border:1px solid rgba(17,181,176,.35);font-size:15px;line-height:1.55;color:#d6ecef}
 .chips{display:flex;flex-direction:column;gap:10px;margin-top:28px;max-width:520px}
 .chip{display:flex;gap:16px;align-items:center;padding:14px 18px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.02);cursor:pointer;transition:.25s;text-align:left;color:inherit;font:inherit}
 .chip:hover,.chip.act{border-color:var(--teal);background:rgba(17,181,176,.1)}
@@ -100,23 +101,24 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
    <div class="chips">
     <button class="chip" data-go="ponte"><i>PONTE /<br>EIXO X</i><span><b>Radar Symeo 291</b><small>Posição da ponte na viga de rolamento</small></span></button>
     <button class="chip" data-go="carro"><i>CARRO /<br>EIXO Y</i><span><b>Radar OndoSense D300</b><small>Posição do carro ao longo da ponte</small></span></button>
-    <button class="chip" data-go="eixoz"><i>EIXO Z /<br>ELEVAÇÃO</i><span><b>Encoder T58</b><small>Elevação da carga</small></span></button>
+    <button class="chip" data-go="eixoz"><i>ELEVAÇÃO /<br>EIXO Z</i><span><b>Encoder T58</b><small>Elevação da carga</small></span></button>
    </div>
   </section>
   <section class="slide" data-k="ponte">
    <p class="eb">01 · Translação da ponte · Eixo X</p>
    <h2>Radar Symeo 291, <em>sem contato.</em></h2>
-   <p class="body">Na cabeceira de cada ponte, o <b>LPR-1DHP-291</b> mede continuamente a distância até um <b>cone refletor</b> fixo na lateral da viga de rolamento.</p>
+   <p class="body">Na cabeceira de cada ponte, o <b>radar LPR-1DHP-291</b> mede continuamente a distância até um <b>cone refletor</b> fixo na lateral da viga de rolamento. Desta maneira garantimos a posição e mitigamos o risco de colisão.</p>
    <div class="specs"><div><span>Mede</span><strong>Posição da ponte</strong></div><div><span>Interface</span><strong>Ethernet + cone refletor</strong></div><div><span>Tecnologia</span><strong>Radar 60 GHz, precisão milimétrica</strong></div><div><span>Quantidade</span><strong>2 · uma por ponte</strong></div></div>
+   <p class="note">Este é mais um passo que garante padronização ao projeto futuro de implementação do WMS.</p>
   </section>
   <section class="slide" data-k="carro">
    <p class="eb">02 · Translação do carro · Eixo Y</p>
    <h2>OndoSense D300 <em>acompanha o carro.</em></h2>
-   <p class="body">Montado no carro de translação, o <b>D300</b> mede a posição do carro ao longo da ponte contra o <b>cone de reflexão</b> instalado na extremidade da viga.</p>
+   <p class="body">Montado no carro de translação, o <b>radar D300</b> mede a posição do carro ao longo da ponte contra o <b>cone de reflexão</b> instalado na extremidade da viga.</p>
    <div class="specs"><div><span>Mede</span><strong>Posição do carro</strong></div><div><span>Interface</span><strong>Analógica + cone de reflexão</strong></div><div><span>Quantidade</span><strong>2 · um por ponte</strong></div></div>
   </section>
   <section class="slide" data-k="eixoz">
-   <p class="eb">03 · Eixo Z · Elevação da carga</p>
+   <p class="eb">03 · Elevação da carga · Eixo Z</p>
    <h2>Encoder T58: <em>içamento da carga.</em></h2>
    <p class="body">No carro, o <b>encoder T58</b>, ligado <b>via Ethernet</b>, faz a medição do <b>içamento da carga</b> no eixo Z.</p>
    <div class="specs"><div><span>Mede</span><strong>Içamento da carga</strong></div><div><span>Interface</span><strong>Ethernet</strong></div><div><span>Quantidade</span><strong>2 · um por ponte</strong></div></div>
@@ -138,6 +140,12 @@ h1 em,h2 em{font-family:'Instrument Serif',serif;font-style:italic;font-weight:4
    <h2>Mesa de comando <em>e PLC.</em></h2>
    <p class="body">O <b>PLC</b> recebe a posição das pontes, que são controladas através da <b>mesa de comando</b>, o posto de trabalho do operador.</p>
    <div class="specs"><div><span>Mesa de comando</span><strong class="au">Autron</strong></div><div><span>PLC</span><strong class="ex">À parte · Rockwell</strong></div></div>
+  </section>
+  <section class="slide" data-k="ergomec">
+   <p class="eb">07 · Posto de trabalho</p>
+   <h2>Mesa de comando <em>ERGOMEC.</em></h2>
+   <p class="body">Posto de trabalho seguro e confortável para operar as pontes a distância. <b>Joysticks, dispositivos de comando e monitores</b> dispostos de forma ergonômica, pensados para a complexidade da operação e para a duração do turno.</p>
+   <div class="specs"><div><span>Comando</span><strong>Joysticks e dispositivos de comando</strong></div><div><span>Visualização</span><strong>Monitores dispostos ao alcance do operador</strong></div><div><span>Aplicações</span><strong>Pontes rolantes, STS, RTG, recuperadoras</strong></div><div><span>Fornecimento</span><strong class="au">Autron</strong></div></div>
   </section>
   <section class="slide" data-k="fluxo">
    <p class="eb">Caminho do sinal</p>
@@ -262,6 +270,42 @@ const pk=[];for(let i=0;i<12;i++){const s=new THREE.Mesh(new THREE.SphereGeometr
 const ringG=new THREE.RingGeometry(.9,1.05,40);const rings=[0,1,2].map(()=>{const r=new THREE.Mesh(ringG,new THREE.MeshBasicMaterial({color:0x11b5b0,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));r.position.set(0,9.6,-RZ-1.3);S.add(r);return r});
 const ZL=RZ;
 R.setClearColor(0xeef2f2);floor.material.color.set(0xeef2f2);
+
+// ===== Mesa ERGOMEC (detalhe) =====
+const MX=36, MZ=14, joys=[], screens=[];
+const mesaG=new THREE.Group();mesaG.position.set(MX,0,MZ);root.add(mesaG);
+const ep=(g,pos,col,rx=0,ry=0,rz=0)=>{const m=part(g,pos,'ergomec',col?{color:col}:{});m.rotation.set(rx,ry,rz);mesaG.add(m);return m};
+ep(box(7,.12,5.5),[0,.06,0],0xe6ecec);
+// mesa em arco (3 segmentos)
+for(const [a,x,z] of [[0,0,-1.1],[.55,-2.05,-.55],[-.55,2.05,-.55]]){
+  ep(box(2.1,.78,.9),[x,.51,z],null,0,a,0);
+  const top=ep(box(2.2,.07,1.05),[x,.93,z+.05],0xdfe6e7,-.12,a,0);
+}
+// monitores: fileira baixa + videowall
+const scr=(x,y,z,ry,w,h,col)=>{const f=ep(box(w,h,.08),[x,y,z],0x2a3b40,0,ry,0);
+  const sm=new THREE.Mesh(new THREE.PlaneGeometry(w*.9,h*.86),new THREE.MeshBasicMaterial({color:col}));
+  sm.position.set(x+Math.sin(ry)*.05,y,z+Math.cos(ry)*.05);sm.rotation.y=ry;mesaG.add(sm);screens.push(sm);return f};
+for(const [x,z,ry] of [[-1.25,-1.45,.0],[0,-1.5,0],[1.25,-1.45,0],[-2.55,-.85,.55],[2.55,-.85,-.55]]){
+  ep(box(.08,.35,.08),[x,1.12,z],0x2a3b40);scr(x,1.62,z,ry,1.15,.68,0x1f6f73)}
+for(const [x,z,ry] of [[-1.25,-1.6,0],[0,-1.65,0],[1.25,-1.6,0]]){scr(x,2.45,z,ry,1.2,.72,0x174f57)}
+ep(box(3.9,.08,.08),[0,2.05,-1.62],0x2a3b40);
+// cadeira com consoles nos braços
+const chair=new THREE.Group();chair.position.set(0,0,.9);mesaG.add(chair);
+const cp=(g,pos,col)=>{const m=part(g,pos,'ergomec',col?{color:col}:{});chair.add(m);return m};
+cp(new THREE.CylinderGeometry(.08,.1,.5,12),[0,.4,0],0x2a3b40);
+cp(new THREE.CylinderGeometry(.45,.45,.06,20),[0,.15,0],0x2a3b40);
+cp(box(.75,.16,.75),[0,.75,0],0x324850);
+const back=cp(box(.75,1.05,.16),[0,1.32,.42],0x324850);back.rotation.x=.18;
+cp(box(.42,.26,.14),[0,1.98,.54],0x324850);
+for(const sx of [-1,1]){
+  cp(box(.34,.14,.85),[sx*.6,1.0,-.12],0xe9f3f3);
+  cp(box(.08,.32,.08),[sx*.6,.84,.2],0x2a3b40);
+  const jg=new THREE.Group();jg.position.set(sx*.6,1.07,-.3);chair.add(jg);joys.push(jg);
+  const st=part(new THREE.CylinderGeometry(.035,.045,.32,10),[0,.16,0],'ergomec',{color:0x2a3b40});jg.add(st);
+  const kn=part(new THREE.SphereGeometry(.075,14,10),[0,.34,0],'ergomec',{color:0x11b5b0});jg.add(kn);
+  for(let i=0;i<3;i++) cp(new THREE.CylinderGeometry(.03,.03,.03,10),[sx*.6+(i-1)*.08,1.085,.12],i==1?0xd9534f:0x11b5b0);
+}
+const tablet=cp(box(.42,.03,.3),[.95,1.25,-.25],0x2a3b40);tablet.rotation.z=-.5;
 // ===== slides =====
 const SL={
  hero:{cam:[0,4,0,.62],hl:['all']},
@@ -272,6 +316,7 @@ const SL={
  remota:{cam:[0,8,5,.85],hl:['remota'],lab:'remota'},
  rede:{cam:[0,7,-1,.7],hl:['rede'],lab:'rede',net:1},
  comando:{cam:[-1.3,1.5,ZW,2.0],hl:['plc','mesa'],lab:'plc',net:.6},
+ ergomec:{cam:[MX,1.4,MZ,3.0],hl:[],lab:'ergomec'},
  fluxo:{cam:[0,6,2,.7],hl:[],flow:1},
  itens:{cam:[0,4,0,.62],hl:['remota','r291','d300','t58','mesa'],tabHL:1},
  fim:{cam:[0,4,0,.6],hl:['all']}
@@ -294,6 +339,7 @@ const LABELS={
  t58:()=>[[wp(groups.t58[0],.9),'Encoder T58','Ethernet · eixo Z']],
  remota:()=>[[wp(groups.remota[0],1),'Remota 1','Ethernet'],[wp(groups.remota[1],1),'Remota 2','Ethernet']],
  rede:()=>[[new THREE.Vector3(0,11.2,-RZ-1.3),'Access point','+ 2 antenas']],
+ ergomec:()=>[[new THREE.Vector3(MX-.6,1.9,MZ+.6),'Joysticks','nos braços da cadeira'],[new THREE.Vector3(MX,3.05,MZ-1.65),'Monitores','câmeras e supervisão'],[new THREE.Vector3(MX+2.1,1.3,MZ-.55),'Dispositivos de comando','']],
  plc:()=>[[new THREE.Vector3(-3.2,3.1,ZW),'PLC','Rockwell'],[new THREE.Vector3(.6,3.1,ZW),'Mesa de comando','posto do operador']],
 };
 const slides=[...document.querySelectorAll('.slide')];
@@ -346,6 +392,7 @@ function frame(now){
  const t=now/1000;
  bridges[0].position.x=-5.5+2.5*Math.sin(t*.33);bridges[1].position.x=5.5+2.5*Math.sin(t*.33+2.2);
  trolleys.forEach((tr,k)=>tr.position.z=4.2*Math.sin(t*.45+k*1.7));
+ joys.forEach((j,k)=>{j.rotation.x=.28*Math.sin(t*1.3+k*1.7);j.rotation.z=.2*Math.sin(t*.9+k)});screens.forEach((m,k)=>{const v=.85+.15*Math.sin(t*2+k*1.3);m.material.color.setRGB(.09*v,.4*v,.42*v)});
  hooks.forEach((h,k)=>h.position.y=BY-2.4+(st.hook?1.6:1.1)*Math.sin(t*(st.hook?1.1:.7)+k));
  const k=ease(clamp((now-st.t0)/1300,0,1));
  const A=res(st.from),B=res(st.cam);const c=A.map((v,j)=>v+(B[j]-v)*k);st.now=c;
